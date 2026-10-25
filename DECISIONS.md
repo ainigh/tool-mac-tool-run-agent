@@ -59,7 +59,7 @@ words; if Peter says he can't, it tells the user, or asks another way.
 6. **Super Face's model is a helpful assistant.** No persona (a concierge or JARVIS was
    considered, and dropped: it would pin the model down when it's helping solve a technical
    problem and only needs Peter for the doing). Its prompt is a small illustrative example, then
-   a brief explanation: about 2,000 characters instead of 7,000. It answers from what it knows when
+   a brief explanation: about 1,650 characters instead of 7,150. It answers from what it knows when
    that's enough; anything to do or find out, it asks Peter, and tells the user only what he
    reports.
 
