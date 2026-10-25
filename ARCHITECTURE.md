@@ -5,7 +5,7 @@ Three apps on one Mac, each with one job:
 | App | Repository | Port | Its job |
 |---|---|---|---|
 | **Super Face** | [JUST-super-mac-tts-ONLY-service](https://github.com/ainigh/JUST-super-mac-tts-ONLY-service) | 8769 | The face and the conversation. It hears you, thinks with one model, and speaks. It does nothing itself: it asks Peter. |
-| **Peter** (Tool Mac Agent) | [tool-mac-tool-run-agent](https://github.com/ainigh/tool-mac-tool-run-agent) | 8770 | Reads requests in plain words and carries them out on Tool Mac Tool Run. Answers in plain words. Keeps the schedule and calls clients back. Keeps no conversation. |
+| **Peter** (Tool Mac Agent) | [tool-mac-tool-run-agent](https://github.com/ainigh/tool-mac-tool-run-agent) | 8770 | His model reads every request in plain words and carries it out with his tools (Tool Mac Tool Run's, Storage Spaces', his own). Answers in plain words. Keeps the schedule and calls clients back. Keeps no conversation. |
 | **Tool Mac Tool Run** | [tool-mac-tool-run](https://github.com/ainigh/tool-mac-tool-run) | 8768 | The hands. Scripts, flows, the web, Chrome, notes, MEMORY, the mind, showing and copying, over an HTTP API. A run waits for you to click Run on the Mac. |
 
 ## The picture, in the end
@@ -22,13 +22,12 @@ flowchart LR
     end
 
     subgraph P["Peter :8770 (tool-mac-tool-run-agent)"]
-        match["templates<br/>(deterministic match)"]
-        brain["Peter's model<br/>(stateless: unclear words, errors)"]
-        words["the answer in words<br/>(a script, not a model)"]
+        brain["Peter's model<br/>(one message, its tool calls; no history)"]
+        own["his tools: schedule, requests,<br/>access, space_notes"]
         sched["schedule<br/>(reminders, later, every day…)"]
         ledger["runs being followed<br/>(news, callbacks)"]
         pui["Peter's window<br/>type or speak; nothing kept"]
-        busy["busy sound while the model reads"]
+        busy["busy sound while the model works"]
     end
 
     subgraph T["Tool Mac Tool Run :8768"]
@@ -39,18 +38,20 @@ flowchart LR
 
     you -- talks or types --> ears --> model
     model -- "@user …" --> voice --> you
-    model -- "@peter … (tone)" --> match
-    match -- "no clean fit" --> brain --> match
+    model -- "@peter … (tone)" --> brain
     brain -.-> busy
-    match -- "a call" --> run
-    run -- "result or error" --> words
-    words -- "error" --> brain
-    words -- "@model … (tone)" --> model
+    brain -- "a tool call" --> run
+    brain -- "a tool call" --> own
+    own --> sched
+    run -- "what it gave back" --> brain
+    brain -- "@model … (tone)" --> model
     run -- "a run" --> card --> you
     ledger -- "run over: POST /api/peter" --> model
     sched -- "due: POST /api/peter" --> model
-    tools -- "what there is (templates)" --> match
-    pui --> match
+    tools -- "what there is (its tools)" --> brain
+    pui --> brain
+    brain -- "notes, MEMORY, the mind,<br/>Super Face's notes" --> SS[("Storage Spaces :8771")]
+    own -- "his schedule, the runs he follows" --> SS
 ```
 
 ### One request, start to end
@@ -64,13 +65,16 @@ sequenceDiagram
     participant T as Tool Mac Tool Run
 
     U->>S: "gonna need an umbrella in Lagos tomorrow?" (shown as "@qwen3 …")
-    S->>P: @peter will it rain in Lagos tomorrow (a tone, not spoken)
-    P->>P: templates: no clean fit
-    P->>M: what was said + the templates (no history); busy sound plays
-    M-->>P: "what's the weather in Lagos" (0.9 sure)
-    P->>T: POST /api/tools/run_script {weather.py, Lagos} (async)
+    S->>P: @peter will it rain in Lagos tomorrow? (a tone, not spoken)
+    P->>M: the instructions + "From: Super Face, Now: …, will it rain in Lagos tomorrow?" + the tools; busy sound plays
+    M-->>P: find {q: "weather"}
+    P->>T: POST /api/tools/find
+    T-->>P: utilities/weather.py, its inputs
+    M-->>P: run_script {utilities/weather.py, [Lagos]}
+    P->>T: POST /api/tools/run_script (async)
     T-->>P: 202, waiting for Run on the Mac
-    P-->>S: "@qwen3 Asked for the weather. I'll tell you how it goes." (a tone)
+    M-->>P: "Asked for the weather in Lagos; you'll hear how it went."
+    P-->>S: "@qwen3 Asked for the weather in Lagos; you'll hear how it went." (a tone)
     S-->>U: "@user I've asked for the weather; click Run on your Mac." (spoken)
     U->>T: clicks Run
     T-->>P: (Peter follows the request) finished
@@ -86,11 +90,14 @@ sequenceDiagram
   Peter (a tone plays, nothing is said). Peter's answer comes back as `@<the model's name> …`, as
   if you had answered, and so does what you say. Peter's messages go to the model at once, even
   while you're talking; what you say goes when you finish, and its answer to you is spoken at once.
-- **Peter keeps no conversation.** Each request is complete in itself. His model sees what was
-  said, why it's asked, and the templates; never a history. What he does keep is operational: the
-  runs he's following (so he can call back when they end) and the schedule (on disk).
-- **Peter's answers are written by a script.** The model is asked only to read words that aren't a
-  template, and to make sense of an error (and, when it can, to fix the request and try again once).
+- **Peter keeps no conversation.** Each message is complete and atomic. His model sees his
+  instructions, the one message and its own tool calls for it; never a history. When he asks for
+  something or can't do it, his answer says to send the whole request again. What he does keep is
+  operational: the runs he's following (so he can call back when they end) and the schedule (on
+  disk, and in his space in Storage Spaces).
+- **Peter does the translating.** There are no templates: every request goes to his model, which
+  calls his tools and writes the answer. A client never learns a format; "how would I ask you to
+  …?" gets the words without anything being done. Why: [DECISIONS.md](DECISIONS.md).
 - **Peter keeps the time.** "Remind me in 20 minutes…", "every morning, what's the weather" are
   Peter's. When one comes due he does it and calls the client back (`POST /api/peter` for Super
   Face). One that came due while the client was closed comes first in its next answer.
@@ -98,7 +105,21 @@ sequenceDiagram
   time, including scheduled ones. Nothing a model says stands in for that click.
 - **Each updates itself** from its GitHub releases, built and published by CI on every push to main.
 
-## The plan (done: all three shipped)
+## The next step (done): Peter's model does it all
+
+What was decided, and why: [DECISIONS.md](DECISIONS.md).
+
+1. **Peter**: the templates, the matcher, the translator, `?exact=true` and the bench taken out.
+   Every request goes to his model with his tools (Tool Mac Tool Run's from `GET /api/tools`, and
+   his own: `schedule`, `requests`, `access`, `space_notes`), on Ollama's own `/api/chat` (its
+   context set), any chat completions address, or Anthropic's Messages API. `/api/say/translator`
+   is `/api/model`, which shows his instructions, his tools and each request's tool calls.
+2. **Super Face**: its prompt a small example and a short explanation, no templates, no persona.
+   Its standing instructions and playbook read straight from its own space in Storage Spaces
+   (SUPER/PROMPT `instructions`, SUPER/MEMORY `playbook`); everything it learns written by Peter,
+   when it asks him to keep it.
+
+## The plan before it (done: all three shipped)
 
 1. **Peter** (tool-mac-tool-run-agent), a menu bar app like Tool Mac Tool Run:
    - `PeterCore` (Foundation only, tested on Linux): Say's templates, matcher, words and translator,
@@ -127,10 +148,10 @@ sequenceDiagram
 | A client that can't be called back (closed, or no address) | What it missed comes first in its next answer, as before. |
 | A reminder that came due while Peter was closed | Done as he opens, saying it's late; over a day late, dropped. |
 | Scheduled runs used to run without a click once allowed | They wait for Run each time now (the consent rule). Reminders and reads (the web, notes) need no click. |
-| Super Face's playbook and standing instructions lived in Tool Mac Tool Run's library | Still there: Super Face asks Peter for them in words ("read the note Super Face playbook"), which is a template, answered without a model. |
+| Super Face's playbook and standing instructions lived in Tool Mac Tool Run's library | In its own space in Storage Spaces (SUPER/PROMPT `instructions`, SUPER/MEMORY `playbook`), read by Super Face straight from there, without a model; Peter writes them when it asks. |
 | A client that used `/api/say` on Tool Mac Tool Run | The same API, on Peter's port; Tool Mac Tool Run answers `/api/say` and `/api/automation` with `moved`, saying where. |
-| Super Face's model is taught to say "@peter remind me in 20 minutes to …" | Peter reads that (and "every weekday at 8am, …") by its words, without his model. |
-| Super Face reading its own notes through Peter shouldn't wait on his model, or take the model's news | It asks with `?exact=true`, as a client of its own ("Super Face (its notes)"). |
+| Super Face's model was taught Peter's templates and his reminder syntax | Nothing to teach now: it asks in plain words, and Peter's model works it out. |
+| Every request now waits on Peter's model, a few turns each | Correctness first: speed comes later, measured (DECISIONS.md). |
 | You talk while the model starts on Peter's news | You're answered first; the news right after. |
 | Peter's schedule, settings and the runs he follows lived only in his Application Support (the runs only in memory: a restart lost their news) | They're kept in his space in Storage Spaces too (PETER/SCHEDULE, SETTINGS without the key, FOLLOWING, STATUS), written when they change; as he opens, whichever is newer (his files or Storage Spaces') is taken, and the runs he was following are followed again. |
 | The person's notes, MEMORY and the mind went through Tool Mac Tool Run | Straight to Storage Spaces now (its routes are the same), and through Tool Mac Tool Run only while Storage Spaces isn't answering: they work with Tool Mac Tool Run closed. |

@@ -183,13 +183,12 @@ struct SettingsView: View {
     @EnvironmentObject var model: PeterModel
     @EnvironmentObject var updater: Updater
     @State private var toolMac = ""
-    @State private var sure = 0.75
     @State private var problem: String?
 
     /// The model the settings have, as the picker shows it ("auto" when it's that, or empty).
     private var current: String {
         let m = model.modelSettings.model
-        return m.isEmpty || !model.modelSettings.isOllama ? SayTranslator.Settings.auto : m
+        return m.isEmpty || !model.modelSettings.isOllama ? Brain.Settings.auto : m
     }
 
     var body: some View {
@@ -201,7 +200,7 @@ struct SettingsView: View {
                 }
             }
             Section("Peter's model") {
-                Toggle("Use a model (without one, only what fits a template is done)", isOn: Binding(get: { model.modelSettings.on }, set: { on in
+                Toggle("Use a model (without one, Peter can't do anything: it reads every request)", isOn: Binding(get: { model.modelSettings.on }, set: { on in
                     Task { problem = await model.changeModel(["on": on]) }
                 }))
                 if let models = model.ollamaModels {
@@ -211,9 +210,9 @@ struct SettingsView: View {
                     Picker("Model", selection: Binding(get: { current }, set: { pick in
                         Task { problem = await model.useOllama(pick) }
                     })) {
-                        Text("Automatic: the best Ollama has" + (model.pickedModel.map { " (now \($0))" } ?? "")).tag(SayTranslator.Settings.auto)
+                        Text("Automatic: the best Ollama has" + (model.pickedModel.map { " (now \($0))" } ?? "")).tag(Brain.Settings.auto)
                         ForEach(models, id: \.self) { Text($0).tag($0) }
-                        if current != SayTranslator.Settings.auto, !models.contains(current) {
+                        if current != Brain.Settings.auto, !models.contains(current) {
                             Text("\(current) (not in Ollama)").tag(current)
                         }
                     }
@@ -222,12 +221,6 @@ struct SettingsView: View {
                 }
                 if !model.modelSettings.isOllama {
                     Text("Now: \(model.modelSettings.model) at \(model.modelSettings.url). Picking a model here switches to Ollama.").font(.caption).foregroundStyle(.secondary)
-                }
-                HStack {
-                    Text("How sure it must be: \(Int(sure * 100))%")
-                    Slider(value: $sure, in: 0.5...0.95, onEditingChanged: { editing in
-                        if !editing { Task { problem = await model.changeModel(["sure": sure]) } }
-                    })
                 }
                 HStack {
                     Button("Refresh") { Task { await model.refreshModels() } }
@@ -262,12 +255,11 @@ struct SettingsView: View {
 
     private func load() {
         toolMac = model.toolMacURL
-        sure = model.modelSettings.sure
     }
 }
 
-/// What Peter's model is given: the instructions (the same every time), and the latest message
-/// it was sent (what was said, why it was asked, and the templates), with what it answered.
+/// What Peter's model is given: the instructions (the same every time), and the latest request
+/// it worked through: the message, each tool it called with what that gave back, and its answer.
 struct PromptView: View {
     @EnvironmentObject var model: PeterModel
 
@@ -275,16 +267,19 @@ struct PromptView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 let m = model.modelSettings
-                Text(m.on ? "Model: \(m.model == SayTranslator.Settings.auto ? "automatic" + (model.pickedModel.map { " (\($0))" } ?? "") : m.model)" : "The model is off: only what fits a template is done.")
+                Text(m.on ? "Model: \(m.model == Brain.Settings.auto ? "automatic" + (model.pickedModel.map { " (\($0))" } ?? "") : m.model)" : "The model is off: Peter can't do anything without it.")
                     .font(.callout).foregroundStyle(.secondary)
-                Block(title: "The system prompt (the same every call)", text: SayTranslator.system)
+                Block(title: "The system prompt (the same every request)", text: model.instructions)
                 if let call = model.lastCall {
-                    Block(title: "The latest message it was sent (\(call.at.formatted(date: .omitted, time: .shortened)), for \"\(call.text)\")",
-                          text: call.translation.user)
-                    Block(title: "What it answered" + (call.translation.error.map { " (\($0))" } ?? ""),
-                          text: call.translation.raw.isEmpty ? "(nothing)" : call.translation.raw)
+                    Block(title: "The latest message (\(call.at.formatted(date: .omitted, time: .shortened)), from \(call.client))", text: call.run.user)
+                    if !call.run.steps.isEmpty {
+                        Block(title: "The tools it called",
+                              text: call.run.steps.map { "\($0.name) \(JSON.string($0.arguments))\n→ \($0.result.count > 600 ? String($0.result.prefix(600)) + "…" : $0.result)" }.joined(separator: "\n\n"))
+                    }
+                    Block(title: "What it answered" + (call.run.error.map { " (\($0))" } ?? ""),
+                          text: call.run.answer.isEmpty ? "(nothing)" : call.run.answer)
                 } else {
-                    Text("It hasn't been asked yet: it is only when the words alone don't settle which template was meant. Each message has what was said, why it's asked, and the templates (the closest first).")
+                    Text("It hasn't been asked yet. Every request goes to it, alone: the instructions, the client's message, and the tools it calls for it; nothing from the one before.")
                         .font(.callout).foregroundStyle(.secondary)
                 }
             }

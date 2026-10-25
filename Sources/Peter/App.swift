@@ -54,13 +54,15 @@ final class PeterModel: ObservableObject {
         didSet { UserDefaults.standard.set(busySound, forKey: "busySound") }
     }
     @Published var toolMacURL = UserDefaults.standard.string(forKey: "toolMacURL") ?? ToolMac.defaultURL
-    @Published private(set) var modelSettings = SayTranslator.Settings()
+    @Published private(set) var modelSettings = Brain.Settings()
     /// The models Ollama has (nil: it isn't answering): the only ones the window offers.
     @Published private(set) var ollamaModels: [String]?
     /// What "auto" was taken as last.
     @Published private(set) var pickedModel: String?
-    /// The latest time his model was asked: what it was given.
-    @Published private(set) var lastCall: SayTranslator.Call?
+    /// The latest request his model worked through: what it was given, and each tool it called.
+    @Published private(set) var lastCall: Brain.Call?
+    /// His model's instructions, as they are now (with Tool Mac Tool Run's guide to its tools).
+    @Published private(set) var instructions = Peter.instructions([])
     /// The window's tab (the menu opens it on one).
     @Published var tab = 0
     /// The window is showing.
@@ -92,7 +94,7 @@ final class PeterModel: ObservableObject {
         server.start(port: Peter.port, network: false)
         let peter = self.peter
         Task {
-            await peter.translator.observe { busy in
+            await peter.brain.observe { busy in
                 DispatchQueue.main.async { MainActor.assumeIsolated { PeterModel.shared.setBusy(busy) } }
             }
             await peter.start(onChange: {
@@ -109,22 +111,23 @@ final class PeterModel: ObservableObject {
     /// How things stand: Tool Mac Tool Run, the model, the schedule.
     func refresh() async {
         health = await peter.health()
-        modelSettings = await peter.translator.settings
-        pickedModel = await peter.translator.pickedModel
-        lastCall = await peter.translator.calls.last
+        modelSettings = await peter.brain.settings
+        pickedModel = await peter.brain.pickedModel
+        lastCall = await peter.brain.calls.last
+        instructions = Peter.instructions(await peter.toolMac.catalog().guide)
         schedule = await peter.schedule.list()
     }
 
     /// Asks Ollama what models it has.
     func refreshModels() async {
-        ollamaModels = await peter.translator.ollamaModels()
+        ollamaModels = await peter.brain.ollamaModels()
     }
 
     /// Uses one of Ollama's models ("auto": the best it has): nil, or what's wrong.
     func useOllama(_ name: String) async -> String? {
         let s = modelSettings
         // Ollama's own address, unless it's set to another Ollama already.
-        let url = !s.isOllama ? SayTranslator.Settings.ollama : s.url
+        let url = !s.isOllama ? Brain.Settings.ollama : s.url
         return await changeModel(["api": "openai", "url": url, "model": name])
     }
 
@@ -192,7 +195,7 @@ final class PeterModel: ObservableObject {
     /// Changes the model's settings: nil, or what's wrong.
     func changeModel(_ fields: [String: Any]) async -> String? {
         do {
-            try await peter.translator.change(fields)
+            try await peter.brain.change(fields)
             await refresh()
             return nil
         } catch {
@@ -277,7 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let st = model.health["storage_spaces"] as? [String: Any] ?? [:]
         info(st["ready"] as? Bool == true ? "Storage Spaces: his things, your notes and MEMORY" : "Storage Spaces isn't answering")
         let shown = m["model"] as? String ?? "?"
-        let auto = shown == SayTranslator.Settings.auto ? (m["picked"] as? String).map { " (\($0))" } ?? "" : ""
+        let auto = shown == Brain.Settings.auto ? (m["picked"] as? String).map { " (\($0))" } ?? "" : ""
         info("Model: \((m["on"] as? Bool) == false ? "off" : shown + auto)\((m["ready"] as? Bool) == false ? " (out of reach)" : "")")
         menu.addItem(.separator())
         action(window == nil ? "Talk to Peter…" : "Hide Peter's Window", #selector(toggleWindow), key: "t")

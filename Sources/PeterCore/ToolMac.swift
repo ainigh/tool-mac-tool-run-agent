@@ -4,7 +4,7 @@ import FoundationNetworking
 #endif
 
 /// A script or a flow in the person's folder, as Tool Mac Tool Run lists it (`GET /api/scripts`,
-/// `GET /api/flows`): what Peter makes its template from.
+/// `GET /api/flows`).
 public struct FolderItem: Sendable, Equatable {
     /// Its name, as Tool Mac Tool Run runs it by ("utilities/weather.py", "translate.flow").
     public var id: String
@@ -77,10 +77,13 @@ public struct ToolInfo: Sendable, Equatable {
     }
 }
 
-/// What Tool Mac Tool Run has now: its tools, and the scripts and flows in the person's folder.
-/// Peter's templates are made from it, so what Tool Mac Tool Run adds is there the day it ships.
+/// What Tool Mac Tool Run has now: its tools (what Peter's model is given), with the lines of
+/// its guide for a model's instructions, and the scripts and flows in the person's folder. What
+/// Tool Mac Tool Run adds is there the day it ships.
 public struct Catalog: Sendable {
     public var tools: [ToolInfo] = []
+    /// `GET /api/tools`' guide: a line each on using its tools well.
+    public var guide: [String] = []
     public var scripts: [FolderItem] = []
     public var flows: [FolderItem] = []
     /// It answered.
@@ -162,6 +165,9 @@ public actor ToolMac {
         let (status, manifest) = await call("GET", "/api/tools", timeout: 5)
         guard status != 0 else {
             c.error = manifest["error"] as? String
+            // Its tools as they were last: called while it's closed, each says it isn't answering.
+            c.tools = cached.tools
+            c.guide = cached.guide
             cached = c
             return c
         }
@@ -172,6 +178,7 @@ public actor ToolMac {
             return c
         }
         c.tools = (manifest["tools"] as? [[String: Any]] ?? []).compactMap(ToolInfo.from)
+        c.guide = (manifest["guide"] as? [String] ?? []).filter { !$0.isEmpty }
         let (ss, sj) = await call("GET", "/api/scripts", timeout: 5)
         let (fs, fj) = await call("GET", "/api/flows", timeout: 5)
         if (200..<300).contains(ss) { c.scripts = (sj["scripts"] as? [[String: Any]] ?? []).compactMap { FolderItem.from($0, flow: false) } }

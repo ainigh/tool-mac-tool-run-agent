@@ -12,9 +12,10 @@ import FoundationNetworking
 /// how things stand (STATUS/now). His own files in Application Support stay as they were, so he
 /// works the same while Storage Spaces is closed; whichever is newer wins when he opens.
 ///
-/// The person's library, MEMORY and the mind he reads and writes straight from here (the same
-/// templates as before: "read the note …", "remember …", "what do you know about …"), and only
-/// through Tool Mac Tool Run when Storage Spaces isn't answering.
+/// The person's library, MEMORY and the mind he reads and writes straight from here (his model
+/// calls the same tools as before: library, remember, recall, memory, mind), and only through
+/// Tool Mac Tool Run when Storage Spaces isn't answering. The notes of the other spaces (Super
+/// Face's prompt and memory, an app's own in OTHER) his model reaches with `space_notes`.
 ///
 /// He claims his name with a key the first time (`POST /api/clients/register`), kept in his
 /// Application Support (`storage-key`), so no other app can pass itself off as him.
@@ -174,8 +175,8 @@ public actor StorageSpaces {
     /// The tools Storage Spaces answers itself (Tool Mac Tool Run's names for them).
     public static let tools: Set<String> = ["library", "remember", "recall", "memory", "mind"]
 
-    /// A storage tool called straight on Storage Spaces, its arguments as Peter's templates make
-    /// them (the same answers Tool Mac Tool Run's tools give: they're the same routes).
+    /// A storage tool called straight on Storage Spaces, its arguments as Tool Mac Tool Run's
+    /// tools take them (the same answers its tools give: they're the same routes).
     public func tool(_ name: String, _ args: [String: Any]) async -> (Int, [String: Any]) {
         switch name {
         case "library": return await call("POST", "/api/library", args)
@@ -191,6 +192,12 @@ public actor StorageSpaces {
         case "mind": return await call("POST", "/api/mind", args)
         default: return (404, ["ok": false, "error": "Storage Spaces has no tool called \(name)"])
         }
+    }
+
+    /// An operation on a notes store of any space (`{"op": "read", "name": "instructions"}` on
+    /// super/prompt): Storage Spaces' answer.
+    public func notes(_ space: String, _ store: String, _ body: [String: Any]) async -> (Int, [String: Any]) {
+        await call("POST", "/api/spaces/\(Self.escape(space))/\(Self.escape(store))", body)
     }
 
     // MARK: letting apps in

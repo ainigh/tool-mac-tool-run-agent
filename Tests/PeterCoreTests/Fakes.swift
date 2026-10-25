@@ -21,9 +21,16 @@ final class FakeToolMac: @unchecked Sendable {
     var down: Bool { get { lock.withLock { _down } } set { lock.withLock { _down = newValue } } }
     var tools: [[String: Any]] { get { lock.withLock { _tools } } set { lock.withLock { _tools = newValue } } }
 
-    static let defaultTools: [[String: Any]] = ["web_search", "web_fetch", "browser", "library", "remember", "recall", "memory", "mind", "show", "copy", "docs", "runs",
-                                                "check_flow", "say", "find", "call_api"].map { ["name": $0, "on": true, "asks_on_the_mac": false] }
-        + ["run_script", "run_flow", "run_flow_code", "straw"].map { ["name": $0, "on": true, "asks_on_the_mac": true] }
+    static let defaultTools: [[String: Any]] = [
+        ["name": "web_search", "description": "Searches the web", "on": true, "asks_on_the_mac": false,
+         "args": [["name": "q", "type": "string", "required": true, "about": "what to search for"], ["name": "limit", "type": "integer", "about": "how many"]]],
+        ["name": "run_script", "description": "Runs a script from the folder", "on": true, "asks_on_the_mac": true,
+         "args": [["name": "script", "type": "string", "required": true, "about": "its name"], ["name": "args", "type": "list", "about": "its inputs"]]],
+    ] + ["web_fetch", "browser", "library", "remember", "recall", "memory", "mind", "show", "copy", "docs", "runs",
+         "check_flow", "say", "find", "call_api"].map { ["name": $0, "on": true, "asks_on_the_mac": false] }
+        + ["run_flow", "run_flow_code", "straw"].map { ["name": $0, "on": true, "asks_on_the_mac": true] }
+
+    static let guide = ["Use find before guessing a script's name."]
 
     static let scripts: [[String: Any]] = [
         ["name": "nightly-backup.sh", "title": "nightly-backup", "group": "scripts", "summary": "Backs up the folder every night", "inputs": [] as [Any]],
@@ -55,7 +62,7 @@ final class FakeToolMac: @unchecked Sendable {
             if down { throw URLError(.cannotConnectToHost) }
             func json(_ o: Any, _ status: Int = 200) -> (Data, Int) { (try! JSONSerialization.data(withJSONObject: o), status) }
             switch (method, url.path) {
-            case ("GET", "/api/tools"): return json(["tools": tools])
+            case ("GET", "/api/tools"): return json(["tools": tools, "guide": Self.guide])
             case ("GET", "/api/scripts"): return json(["scripts": Self.scripts])
             case ("GET", "/api/flows"): return json(["flows": [["name": "translate.flow", "title": "translate", "inputs": [["prompt": "What to translate", "kind": "argument"]]]]])
             case ("GET", "/api/health"): return json(["ok": true, "version": "0.1.99"])
@@ -103,48 +110,58 @@ final class FakeToolMac: @unchecked Sendable {
     }
 }
 
-/// A pretend model: answers what it's told to, and keeps what it was asked.
+/// A pretend model, answering as Ollama does on `/api/chat`: each answer in turn calls a tool
+/// or says something, as a test tells it to. It keeps every request it was sent.
 final class FakeModel: @unchecked Sendable {
+    enum Move {
+        case call(String, [String: Any])
+        case says(String)
+        /// Its answer worked out from what it was sent (the messages so far).
+        case reads(@Sendable ([[String: Any]]) -> Move)
+    }
+
     private let lock = NSLock()
-    private var _answers: [String] = []
+    private var _moves: [Move] = []
     private var _fails = false
-    private(set) var asked: [URLRequest] = []
+    private var _asked: [URLRequest] = []
 
     var fails: Bool { get { lock.withLock { _fails } } set { lock.withLock { _fails = newValue } } }
-    var count: Int { lock.withLock { asked.count } }
+    /// The chat requests it was sent (not the ones asking what models there are).
+    var asked: [[String: Any]] { lock.withLock { _asked.filter { $0.url?.path != "/api/tags" }.compactMap { $0.httpBody.flatMap(JSON.object) } } }
+    var count: Int { asked.count }
 
-    /// What it says next (several: one a call, the last again after).
-    func says(_ json: String...) { lock.withLock { _answers = json } }
+    /// What it does next, one answer each, in order (the last, again and again after).
+    func plays(_ moves: Move...) { lock.withLock { _moves = moves } }
 
-    var send: SayTranslator.Send {
+    var send: Brain.Send {
         { [self] request in
-            let (fails, answer) = lock.withLock { () -> (Bool, String) in
-                asked.append(request)
-                let a = _answers.count > 1 ? _answers.removeFirst() : _answers.first ?? "{}"
-                return (_fails, a)
+            let (fails, move) = lock.withLock { () -> (Bool, Move?) in
+                _asked.append(request)
+                if request.url?.path == "/api/tags" { return (_fails, nil) }
+                return (_fails, _moves.count > 1 ? _moves.removeFirst() : _moves.first)
             }
             if fails { throw URLError(.cannotConnectToHost) }
             if request.url?.path == "/api/tags" {
                 return (try JSONSerialization.data(withJSONObject: ["models": [["name": "nomic-embed-text"], ["name": "llama3.2:3b"], ["name": "qwen3:8b"]]]), 200)
             }
-            let body: [String: Any] = ["choices": [["message": ["role": "assistant", "content": answer]]]]
-            return (try JSONSerialization.data(withJSONObject: body), 200)
+            let messages = request.httpBody.flatMap(JSON.object)?["messages"] as? [[String: Any]] ?? []
+            var m = move ?? .says("(nothing to say)")
+            if case let .reads(f) = m { m = f(messages) }
+            let message: [String: Any]
+            switch m {
+            case let .call(name, args): message = ["role": "assistant", "content": "", "tool_calls": [["function": ["name": name, "arguments": args]]]]
+            case let .says(text): message = ["role": "assistant", "content": text]
+            case .reads: message = ["role": "assistant", "content": ""]
+            }
+            return (try JSONSerialization.data(withJSONObject: ["model": "qwen3:8b", "message": message, "done": true]), 200)
         }
     }
 
-    /// The prompt it was last given.
-    var lastUser: String {
-        guard let r = lock.withLock({ asked.last }), let body = r.httpBody,
-              let o = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
-              let messages = o["messages"] as? [[String: Any]] else { return "" }
-        return messages.last?["content"] as? String ?? ""
-    }
+    /// The messages of the request it was last sent.
+    var lastMessages: [[String: Any]] { asked.last?["messages"] as? [[String: Any]] ?? [] }
 
-    var lastModel: String {
-        guard let r = lock.withLock({ asked.last }), let body = r.httpBody,
-              let o = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else { return "" }
-        return o["model"] as? String ?? ""
-    }
+    /// What the last tool it called gave back, as it was sent to it.
+    var lastResult: String { (lastMessages.last { $0["role"] as? String == "tool" }?["content"] as? String) ?? "" }
 }
 
 /// What a client was told, by its callback.

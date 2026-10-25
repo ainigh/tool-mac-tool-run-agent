@@ -309,6 +309,11 @@ public enum JSON {
         data(object) + Data("\n".utf8)
     }
 
+    /// As text: `{"q":"weather"}`.
+    public static func string(_ object: Any) -> String {
+        String(decoding: data(object), as: UTF8.self)
+    }
+
     public static func object(_ data: Data) -> [String: Any]? {
         (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
