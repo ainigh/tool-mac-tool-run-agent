@@ -91,7 +91,7 @@ final class PeterModel: ObservableObject {
             await refresh()
         }
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { _ in
-            MainActor.assumeIsolated { Task { await PeterModel.shared.refresh() } }
+            Task { @MainActor in await PeterModel.shared.refresh() }
         }
         updater.start()
     }
@@ -121,7 +121,7 @@ final class PeterModel: ObservableObject {
     }
 
     /// Peter's own sound while his model works: distinct from anything else on the Mac.
-    static func playBusy() {
+    nonisolated static func playBusy() {
         let sound = NSSound(named: "Morse") ?? NSSound(named: "Tink")
         sound?.volume = 0.35
         sound?.play()
