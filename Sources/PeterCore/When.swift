@@ -209,3 +209,96 @@ public enum When {
         return "in \(Int((Double(h) / 24).rounded())) days"
     }
 }
+
+/// Something for later, said in a sentence, read without a model: "remind me in 20 minutes to call
+/// Sam", "remind me at 5pm: the oven", "remind me to stretch in an hour", "every weekday at 8am,
+/// search the web for the traffic", "every morning: remind me to drink water", "tomorrow at 9,
+/// run the backup". The time is whatever part of it reads as one (`When.parse`), so a message
+/// with "to" or "at" in it stays whole.
+public struct LaterWords: Equatable, Sendable {
+    public enum Kind: String, Sendable { case remind, later }
+    public var kind: Kind
+    public var when: String
+    public var repeats: When.Repeat?
+    public var text: String
+
+    public static func read(_ said: String, now: Date = Date()) -> LaterWords? {
+        let s = said.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.contains("\n") else { return nil }
+        let lower = s.lowercased()
+        // "every weekday at 8am, …", "every day: …", "each morning, …"
+        if let m = When.match(#"^((?:every|each)\s+[^,:]+?)(?:\s+at\s+([^,:]+?))?\s*[,:]\s*(.+)$"#, s),
+           let r = When.Repeat.parse(m[1].lowercased().replacingOccurrences(of: "each", with: "every")) ?? morningRepeat(m[1]) {
+            let when = m[2].isEmpty ? defaultTime(m[1]) : m[2]
+            guard When.parse(when, now: now) != nil else { return nil }
+            var rest = m[3].trimmingCharacters(in: .whitespaces)
+            if let reminder = remindRest(rest) { rest = reminder; return LaterWords(kind: .remind, when: when, repeats: r, text: rest) }
+            return LaterWords(kind: .later, when: when, repeats: r, text: rest)
+        }
+        // "remind me …"
+        if lower.hasPrefix("remind me ") {
+            let rest = String(s.dropFirst("remind me ".count))
+            // the time first: "in 20 minutes to …", "at 5pm: …", "tomorrow at 9 that …"
+            for sep in [" to ", ": ", ", ", " that ", " about "] {
+                var from = rest.startIndex
+                while let r = rest.range(of: sep, options: .caseInsensitive, range: from..<rest.endIndex) {
+                    let left = String(rest[..<r.lowerBound]), right = String(rest[r.upperBound...])
+                    if When.parse(left, now: now) != nil, !right.trimmingCharacters(in: .whitespaces).isEmpty {
+                        return LaterWords(kind: .remind, when: left, repeats: nil, text: right.trimmingCharacters(in: .whitespaces))
+                    }
+                    from = r.upperBound
+                }
+            }
+            // the time last: "to stretch in an hour", "to call Sam at 5pm"
+            let what = rest.replacingOccurrences(of: #"^(to|that|about)\s+"#, with: "", options: [.regularExpression, .caseInsensitive])
+            if let (text, when) = timeAtEnd(what, now: now) {
+                return LaterWords(kind: .remind, when: when, repeats: nil, text: text)
+            }
+            return nil
+        }
+        // "in 2 hours, …", "at 5pm: …", "tomorrow at 9, …"
+        // (a clock time or "in …": "tomorrow, what's the weather" is a question about tomorrow, not for later)
+        if let m = When.match(#"^([^,:]+?)\s*[,:]\s*(.+)$"#, s), When.parse(m[1], now: now) != nil,
+           !(m[1].lowercased().hasPrefix("every")), m[1].range(of: #"\d|^in "#, options: [.regularExpression, .caseInsensitive]) != nil {
+            let rest = m[2].trimmingCharacters(in: .whitespaces)
+            if let reminder = remindRest(rest) { return LaterWords(kind: .remind, when: m[1], repeats: nil, text: reminder) }
+            return LaterWords(kind: .later, when: m[1], repeats: nil, text: rest)
+        }
+        return nil
+    }
+
+    /// "remind me to drink water" → "drink water" (nil: it isn't a reminder).
+    static func remindRest(_ s: String) -> String? {
+        guard let m = When.match(#"^(?:remind me|tell me)\s+(?:to\s+|that\s+|about\s+)?(.+)$"#, s.trimmingCharacters(in: .whitespaces)) else { return nil }
+        return m[1]
+    }
+
+    /// The longest end of the words that reads as a time: "stretch in an hour" → ("stretch", "in an hour").
+    static func timeAtEnd(_ s: String, now: Date) -> (String, String)? {
+        let words = s.split(separator: " ", omittingEmptySubsequences: true)
+        guard words.count >= 2 else { return nil }
+        for k in 1..<words.count {
+            let when = words[k...].joined(separator: " ")
+            if When.parse(when, now: now) != nil {
+                let text = words[..<k].joined(separator: " ").trimmingCharacters(in: CharacterSet(charactersIn: " ,"))
+                return text.isEmpty ? nil : (text, when)
+            }
+        }
+        return nil
+    }
+
+    /// "every morning", "every evening", "every night": every day, at that part of it.
+    static func morningRepeat(_ s: String) -> When.Repeat? {
+        ["morning", "afternoon", "evening", "night"].contains { s.lowercased().hasSuffix($0) } ? .daily : nil
+    }
+
+    /// The time a repeat with none said starts at: 7:00 for the morning, 19:00 the evening, else 9:00.
+    static func defaultTime(_ s: String) -> String {
+        let l = s.lowercased()
+        if l.hasSuffix("morning") { return "7:00" }
+        if l.hasSuffix("afternoon") { return "13:00" }
+        if l.hasSuffix("evening") || l.hasSuffix("night") { return "19:00" }
+        if l.contains("hour") || l.contains("minute") { return "in 1 minute" }
+        return "9:00"
+    }
+}

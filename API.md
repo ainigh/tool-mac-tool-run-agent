@@ -139,6 +139,11 @@ around 3"), or its number ("number 3").
 | What's scheduled | `what's scheduled` | the client's, soonest first, each with its number |
 | Cancel something scheduled | `cancel the schedule {its number, a word from it, or all}` | taken off |
 
+Said in a sentence, it's read by its words, without the model: `remind me in 20 minutes to call
+Sam`, `remind me at 5pm: the oven`, `remind me to stretch in an hour`, `every weekday at 8am, search
+the web for the traffic`, `every morning: remind me to drink water`, `in 2 hours, run the nightly
+backup`.
+
 `when` is how a person says it: `in 20 minutes`, `in an hour`, `at 17:30`, `5:30 pm`, `tomorrow
 8am`, `Friday 9:00`, `3 November at noon`, `2026-11-03 14:00`. A time of day alone is today, or
 tomorrow once it has passed. Something due while Peter was closed is done as he opens, saying it's

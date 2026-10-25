@@ -275,6 +275,15 @@ public final class Peter: @unchecked Sendable {
         // The labeled shape: a title, and a line for each value.
         if let lines = SayMatch.lines(text), let reply = await sayLabeled(lines, text, ctx) { return reply }
 
+        // Something for later, said in a sentence ("remind me in 20 minutes to call Sam"): read by its words.
+        if let later = LaterWords.read(text) {
+            var f = SayFilled()
+            f.values = ["when": later.when, "repeat": later.repeats?.said ?? "", later.kind == .remind ? "message" : "what": later.text]
+            if let form = ctx.form(later.kind == .remind ? "Remind me" : "Do something later") {
+                return await sayScheduling(later.kind == .remind ? .remind : .later, form, f, said: text, ctx)
+            }
+        }
+
         // The inline shape: the closest sentence.
         var found: [(form: SayForm, filled: SayFilled, score: Double, fixed: Int)] = []
         for f in ctx.forms where f.isInline {

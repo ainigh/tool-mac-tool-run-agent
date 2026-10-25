@@ -291,6 +291,24 @@ final class PeterTests: XCTestCase {
         XCTAssertTrue(cancelled.hasPrefix("Taken off the schedule: 1. search the web for Lagos weather."), cancelled)
     }
 
+    func testSomethingForLaterInASentenceIsReadWithoutAModel() async throws {
+        let now = Date()
+        func read(_ s: String) -> LaterWords? { LaterWords.read(s, now: now) }
+        XCTAssertEqual(read("remind me in 20 minutes to tell the user to call Sam"), LaterWords(kind: .remind, when: "in 20 minutes", repeats: nil, text: "tell the user to call Sam"))
+        XCTAssertEqual(read("remind me at 5pm: the oven"), LaterWords(kind: .remind, when: "at 5pm", repeats: nil, text: "the oven"))
+        XCTAssertEqual(read("remind me to stretch in an hour"), LaterWords(kind: .remind, when: "in an hour", repeats: nil, text: "stretch"))
+        XCTAssertEqual(read("every weekday at 8am, search the web for traffic on I-35"), LaterWords(kind: .later, when: "8am", repeats: .weekdays, text: "search the web for traffic on I-35"))
+        XCTAssertEqual(read("every morning: remind me to drink water"), LaterWords(kind: .remind, when: "7:00", repeats: .daily, text: "drink water"))
+        XCTAssertEqual(read("in 2 hours, run the nightly backup"), LaterWords(kind: .later, when: "in 2 hours", repeats: nil, text: "run the nightly backup"))
+        XCTAssertNil(read("tomorrow, what's the weather"), "a question about tomorrow")
+        XCTAssertNil(read("remind me what I asked for"))
+        XCTAssertNil(read("search the web for Walmart hours"))
+        // Said so to Peter: set, with no model to ask.
+        let set = await say("remind me in 20 minutes to tell the user to call Sam")
+        XCTAssertTrue(set.contains("(in 20 minutes): a reminder: tell the user to call Sam."), set)
+        XCTAssertEqual(model.count, 0)
+    }
+
     func testTheScheduleOutlastsARestart() async throws {
         _ = await say("Remind me\n- when: tomorrow 9am\n- message: stand up")
         let again = Schedule(file: home.appendingPathComponent("schedule.json"))
