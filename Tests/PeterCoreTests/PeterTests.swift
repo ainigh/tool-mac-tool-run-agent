@@ -207,6 +207,17 @@ final class PeterTests: XCTestCase {
         XCTAssertFalse(model.lastUser.contains("Tester"), "the model sees no client, no history")
     }
 
+    func testExactNeverAsksTheModel() async {
+        withModel()
+        model.says(#"{"meaning": "", "suggestions": [{"title": "Search the web", "say": "search the web for x", "confidence": 0.9}], "question": ""}"#)
+        let r = await peter.route(HTTPRequest(method: "POST", target: "/api/say?exact=true", headers: ["X-Client": "Tester"], body: Data("gonna need an umbrella?".utf8)))
+        let out = String(decoding: r.bodyData ?? Data(), as: UTF8.self)
+        XCTAssertFalse(out.contains("Taken as"), out)
+        XCTAssertEqual(model.count, 0, "the model isn't asked")
+        let read = await peter.say("read the note groceries", client: "Tester", exact: true)
+        XCTAssertTrue(read.hasPrefix("The note groceries:"), read)
+    }
+
     func testAutoIsTheBestModelOllamaHas() async {
         var s = SayTranslator.Settings()
         XCTAssertEqual(s.model, "auto")

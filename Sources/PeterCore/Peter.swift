@@ -57,7 +57,7 @@ public final class Peter: @unchecked Sendable {
 
     /// Every route there is: `GET /api` lists them.
     public static let routes: [(String, String, String)] = [
-        ("POST", "/api/say", "say what you want, as text (text/plain, or {\"text\"}): the answer is plain text. ?client= (or X-Client): who's talking. X-Reply-To (an http address on this Mac): where to be told the moment a run is over, and when something scheduled is due"),
+        ("POST", "/api/say", "say what you want, as text (text/plain, or {\"text\"}): the answer is plain text. ?client= (or X-Client): who's talking. ?exact=true (or X-Exact): only what fits a template, without the model. X-Reply-To (an http address on this Mac): where to be told the moment a run is over, and when something scheduled is due"),
         ("GET", "/api/say", "how to talk to Peter, as text"),
         ("GET", "/api/say/forms", "every template there is now (?q=words: the ones that fit, best first; ?format=json)"),
         ("GET", "/api/say/log", "what this client asked for, and how each went (JSON, the newest first)"),
@@ -109,7 +109,9 @@ public final class Peter: @unchecked Sendable {
             } else {
                 text = req.body.isEmpty ? (req.query["text"] ?? req.query["q"] ?? "") : String(decoding: req.body, as: UTF8.self)
             }
-            return Self.plainText(await say(text, client: client))
+            // exact: only what fits a template is done, without the model (quick, for a client reading its own notes).
+            let exact = Self.flag(req.query["exact"].map { $0 } ?? req.header("x-exact")) || (fields["exact"] as? Bool ?? false)
+            return Self.plainText(await say(text, client: client, exact: exact))
         case ("GET", "/api/say"):
             return Self.plainText(Self.howTo)
         case ("GET", "/api/say/forms"):
@@ -221,19 +223,21 @@ public final class Peter: @unchecked Sendable {
         let client: String
         let forms: [SayForm]
         let catalog: Catalog
+        /// Without the model: only what fits a template is done.
+        var exact = false
 
         func form(_ title: String) -> SayForm? { forms.first { $0.title == title } }
         func forms(_ titles: [String]) -> [SayForm] { titles.compactMap(form) }
     }
 
-    func context(_ client: String) async -> SayContext {
+    func context(_ client: String, exact: Bool = false) async -> SayContext {
         let c = await toolMac.catalog()
-        return SayContext(client: client, forms: SayForms.all(catalog: c), catalog: c)
+        return SayContext(client: client, forms: SayForms.all(catalog: c), catalog: c, exact: exact)
     }
 
     /// Everything a reply says: the news, the answer, and what can be said next.
-    public func say(_ text: String, client: String) async -> String {
-        let ctx = await context(client)
+    public func say(_ text: String, client: String, exact: Bool = false) async -> String {
+        let ctx = await context(client, exact: exact)
         var news = await sayNews(client, tell: true)
         let reply = await sayAnswer(text, ctx)
         await sayLog.with(client) { $0.lastSpoke = Date() }
@@ -649,7 +653,7 @@ public final class Peter: @unchecked Sendable {
     /// out of reach, or it found nothing). With `list` false, only a reading it's sure of counts
     /// (Peter has an answer of his own to fall back on).
     func sayTranslate(_ text: String, _ why: SayTranslator.Why, _ ctx: SayContext, list: Bool) async -> SayReply? {
-        guard await translator.ready else { return nil }
+        guard !ctx.exact, await translator.ready else { return nil }
         let used = await sayLog.with(ctx.client) { $0.used }
         let (forms, closest) = Self.translatorForms(text, why, ctx.forms, used: used)
         let t = await translator.translate(text, why: why, forms: forms, closest: closest)
@@ -677,7 +681,7 @@ public final class Peter: @unchecked Sendable {
     /// or other values), that's done once, and the answer says so; if not, the failure with what
     /// it makes of it. Nil when the model has nothing to add.
     func sayMend(_ form: SayForm, _ filled: SayFilled, failure: String, said: String, _ ctx: SayContext) async -> SayReply? {
-        guard await translator.ready else { return nil }
+        guard !ctx.exact, await translator.ready else { return nil }
         let done = Self.filledIn(form, filled)
         let why = SayTranslator.Why.failed(done, failure)
         let used = await sayLog.with(ctx.client) { $0.used }

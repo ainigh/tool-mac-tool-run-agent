@@ -43,6 +43,7 @@ curl -s 'localhost:8770/api/say?client=My+App' -H 'X-Reply-To: http://127.0.0.1:
 |---|---|
 | **Request** | `POST /api/say`, the words as the body (`Content-Type: text/plain`), or JSON `{"text": "…", "client": "…", "reply_to"?: "…"}` |
 | **Who's talking** | `?client=`, the `X-Client` header, `"client"`, else the User-Agent. Each client's requests are its own. |
+| **Exact** | `?exact=true` (or `X-Exact: true`, or `"exact": true`): only what fits a template is done, and his model is never asked (no reading of loose words, no second try after a failure). Quick, for a client reading its own notes. |
 | **Answer** | `text/plain`, always `200`. A refusal or a failure is said in words. Never JSON, routes, file names or ids. |
 | **Told when it's over** | `X-Reply-To` (or `"reply_to"`): an `http` address on this Mac. The moment a run of this client's is over, or something it scheduled is due, it's POSTed there as `{"client", "text": "Meanwhile: …", "entries": [as /api/say/log has them]}`. What couldn't be delivered comes first in its next answer. |
 
