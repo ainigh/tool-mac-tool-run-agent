@@ -154,6 +154,33 @@ public actor Schedule {
         return true
     }
 
+    /// What's kept, as JSON ({"next", "items"}): for Storage Spaces (PETER/SCHEDULE/schedule).
+    public func snapshot() -> Any? {
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        guard let data = try? enc.encode(Kept(next: next, items: items)) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data)
+    }
+
+    /// Takes what was kept elsewhere instead (Storage Spaces had a newer one): whether it could be read.
+    @discardableResult
+    public func restore(_ value: Any) -> Bool {
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        guard JSONSerialization.isValidJSONObject(value), let data = try? JSONSerialization.data(withJSONObject: value),
+              let kept = try? dec.decode(Kept.self, from: data) else { return false }
+        items = kept.items
+        next = max(kept.next, (kept.items.map(\.id).max() ?? 0) + 1)
+        save()
+        onChange?()
+        return true
+    }
+
+    /// When the file was last written (nil: there's none, or it's kept in memory only).
+    public var savedAt: Date? {
+        file.flatMap { try? FileManager.default.attributesOfItem(atPath: $0.path)[.modificationDate] as? Date }
+    }
+
     func save() {
         guard let file else { return }
         let enc = JSONEncoder()

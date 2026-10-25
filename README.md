@@ -25,11 +25,22 @@ to him: its model writes `@peter …` and Peter answers. How the three apps fit:
   menu bar icon changes). Turn it off in his menu.
 - **The schedule.** "Remind me in 20 minutes to stand up", "every weekday at 8, search the web for
   the traffic on I-35". When it's due he calls the asker back (or tells it first thing in its next
-  answer). Kept on disk, so it survives a restart.
+  answer). Kept on disk and in his space in Storage Spaces, so it survives a restart.
+- **Storage Spaces.** What he needs to work is kept in his own space of
+  [Storage Spaces](https://github.com/ainigh/tool-mac-tool-run-storage-spaces) (PETER: his
+  schedule, his model's settings without any key, the runs he's following, how things stand), and
+  the person's notes, MEMORY and the mind come straight from there ("read the note groceries",
+  "remember…", "what do you know about Ada"), even with Tool Mac Tool Run closed. He's the one who
+  lets other apps in: "who's asking for access", and, in his window only, "allow request 3", "let
+  Super Face read my memory"; "stop letting Super Voice in" takes it back.
 - **His window.** Click the icon › **Talk to Peter…**: type, or click the microphone and speak
-  (macOS's own speech recognition). Each message goes to him on its own, as an API call would, and
-  nothing in the window is kept once you close it. The window also lists what's scheduled (with a
-  way to take each off) and his settings: where Tool Mac Tool Run is, his model, the sound.
+  (macOS's own speech recognition). It stays in front of every other window (and on every
+  desktop) until you click **Hide Peter's Window** in the same menu. Each message goes to him on
+  its own, as an API call would, and nothing in the window is kept once it's hidden. Its tabs:
+  **Talk**, **Scheduled** (with a way to take each off), **Prompt** (the system prompt his model is
+  given, the latest message it was sent and what it answered, each with a copy button), and
+  **Settings**: where Tool Mac Tool Run is, his model (picked from the models Ollama has, or
+  Automatic: the best of them), how sure it must be, the sound.
 - **Consent stays yours.** A script or flow still waits for you to click Run on the Mac, every
   time, whoever asked and whenever.
 
@@ -37,8 +48,10 @@ to him: its model writes `@peter …` and Peter answers. How the three apps fit:
 
 Needs [Tool Mac Tool Run](https://github.com/ainigh/tool-mac-tool-run) (with its API on) and a
 model: [Ollama](https://ollama.com) with one pulled (`brew install ollama`, then `ollama pull
-qwen3:8b`; he picks the best one you have), or Claude with a key. Without a model he still does
-whatever fits one of his templates.
+qwen3:8b`; he picks the best one you have, or the one you pick in his window). Without a model he
+still does whatever fits one of his templates. With
+[Storage Spaces](https://github.com/ainigh/tool-mac-tool-run-storage-spaces) open, he keeps his
+things there too, and reads and writes your notes and MEMORY straight from it.
 
 Paste this in Terminal (it installs Homebrew's `gh` if needed and signs you in to GitHub, since
 the repository may be private):
@@ -57,7 +70,9 @@ notification) says so, and **Update** installs it and restarts him (if the new o
 one you had comes back). Running the install line again works too. What an update did is in
 `~/Library/Logs/Peter/update.log`.
 
-His settings and schedule are in `~/Library/Application Support/Peter/`.
+His settings and schedule are in `~/Library/Application Support/Peter/` (and in Storage Spaces'
+PETER space: whichever is newer is taken as he opens), with the key he claims his name in
+Storage Spaces with (`storage-key`).
 
 ## Try it
 

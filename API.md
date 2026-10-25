@@ -284,7 +284,7 @@ click, and that holds for what runs on the schedule too.
 | `GET /api/schedules` | what's scheduled (`?client=`: one client's): `{"schedules": [{"number", "client", "kind", "text", "due", "repeat"?, "reply_to"?, "said"}]}` |
 | `POST /api/schedules` | something scheduled without words: `{"kind": "remind" \| "later", "text", "when", "repeat"?, "client"?, "reply_to"?}` |
 | `DELETE /api/schedules/{number}` | taken off |
-| `GET /api/health` | `{"service": "peter", "version", "tool_mac_tool_run": {"url", "reachable", "tools", "scripts", "flows"}, "model": {"api", "model", "ready", "working"}, "scheduled"}` |
+| `GET /api/health` | `{"service": "peter", "version", "tool_mac_tool_run": {"url", "reachable", "tools", "scripts", "flows"}, "model": {"api", "model", "picked", "ready", "working"}, "scheduled", "storage_spaces": {"url", "ready", "key", "problem"?}}` |
 | `GET /api` | these routes |
 
 States (as `/api/say/log` has them): `answered`, `done`, `failed`, `waiting` (for the OK on the

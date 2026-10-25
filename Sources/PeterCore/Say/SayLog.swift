@@ -75,6 +75,81 @@ public actor SayLog {
 
         /// Words it's found by when the client refers to it.
         var words: Set<String> { Set(APISearch.query(what + " " + short + " " + form + " " + said)) }
+
+        /// As it's kept in Storage Spaces.
+        var json: [String: Any] {
+            var out: [String: Any] = ["number": number, "asked": JSON.date(asked), "said": said, "form": form, "what": what, "short": short,
+                                      "state": state.key, "shown": shown, "muted": muted, "asks": asks]
+            switch state {
+            case let .failed(why), let .couldNotStart(why): out["why"] = why
+            case let .finished(ok, code):
+                out["ok"] = ok
+                if let code { out["code"] = code }
+            default: break
+            }
+            out["state_kind"] = Self.kind(state)
+            if let request { out["request"] = request.uuidString }
+            if let result { out["result"] = result.count > 20000 ? String(result.suffix(20000)) : result }
+            if let told { out["told"] = told }
+            if let ended { out["ended"] = JSON.date(ended) }
+            return out
+        }
+
+        static func kind(_ s: State) -> String {
+            switch s {
+            case .answered: "answered"
+            case .done: "done"
+            case .failed: "failed"
+            case .waiting: "waiting"
+            case .running: "running"
+            case .finished: "finished"
+            case .denied: "denied"
+            case .notAnswered: "not_answered"
+            case .withdrawn: "withdrawn"
+            case .couldNotStart: "could_not_start"
+            case .stopped: "stopped"
+            }
+        }
+
+        init(number: Int, asked: Date, said: String, form: String, what: String, short: String, request: UUID?, state: State, result: String?) {
+            self.number = number
+            self.asked = asked
+            self.said = said
+            self.form = form
+            self.what = what
+            self.short = short
+            self.request = request
+            self.state = state
+            self.result = result
+        }
+
+        init?(json j: [String: Any]) {
+            func date(_ v: Any?) -> Date? { (v as? String).flatMap { try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse($0) } }
+            guard let number = j["number"] as? Int, let asked = date(j["asked"]) else { return nil }
+            let why = j["why"] as? String ?? ""
+            let state: State
+            switch j["state_kind"] as? String ?? "" {
+            case "answered": state = .answered
+            case "done": state = .done
+            case "failed": state = .failed(why)
+            case "waiting": state = .waiting
+            case "running": state = .running
+            case "finished": state = .finished(ok: j["ok"] as? Bool ?? false, code: j["code"] as? Int)
+            case "denied": state = .denied
+            case "not_answered": state = .notAnswered
+            case "withdrawn": state = .withdrawn
+            case "could_not_start": state = .couldNotStart(why)
+            case "stopped": state = .stopped
+            default: return nil
+            }
+            self.init(number: number, asked: asked, said: j["said"] as? String ?? "", form: j["form"] as? String ?? "", what: j["what"] as? String ?? "",
+                      short: j["short"] as? String ?? "", request: (j["request"] as? String).flatMap(UUID.init(uuidString:)), state: state, result: j["result"] as? String)
+            shown = j["shown"] as? Bool ?? false
+            muted = j["muted"] as? Bool ?? false
+            asks = j["asks"] as? Bool ?? false
+            told = j["told"] as? String
+            ended = date(j["ended"])
+        }
     }
 
     public struct Conversation: Sendable {
@@ -171,4 +246,40 @@ public actor SayLog {
 
     /// The clients there are, the latest last.
     public func clients() -> [String] { order }
+
+    // MARK: outlasting a restart
+
+    /// What's still being followed, or over and not told yet, for every client (with where it's
+    /// to be told): what Peter keeps in Storage Spaces (PETER/FOLLOWING/runs), so a restart
+    /// doesn't lose the news.
+    public func following() -> [[String: Any]] {
+        order.compactMap { client -> [String: Any]? in
+            guard let c = conversations[client] else { return nil }
+            let entries = c.entries.filter { $0.asks && ($0.state.open || (!$0.muted && $0.state.key != $0.told)) }
+            guard !entries.isEmpty else { return nil }
+            var out: [String: Any] = ["client": client, "counter": c.counter, "entries": entries.map(\.json)]
+            if let u = c.replyTo { out["reply_to"] = u.absoluteString }
+            return out
+        }
+    }
+
+    /// Takes them back after a restart (entries a client has already are left as they are):
+    /// the clients that have somewhere to be told.
+    public func restore(_ list: [[String: Any]], now: Date = Date()) -> [String] {
+        var told: [String] = []
+        for item in list {
+            guard let client = item["client"] as? String else { continue }
+            let entries = (item["entries"] as? [[String: Any]] ?? []).compactMap(Entry.init(json:)).filter { now.timeIntervalSince($0.asked) <= Self.keep }
+            guard !entries.isEmpty else { continue }
+            let reply = (item["reply_to"] as? String).flatMap(URL.init(string:))
+            with(client) { c in
+                for e in entries where !c.entries.contains(where: { $0.number == e.number }) { c.entries.append(e) }
+                c.entries.sort { $0.number < $1.number }
+                c.counter = max(c.counter, item["counter"] as? Int ?? 0, entries.map(\.number).max() ?? 0)
+                if c.replyTo == nil { c.replyTo = reply }
+            }
+            if reply != nil { told.append(client) }
+        }
+        return told
+    }
 }

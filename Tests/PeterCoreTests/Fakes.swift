@@ -175,3 +175,78 @@ extension XCTestCase {
         }
     }
 }
+
+/// A pretend Storage Spaces: Peter's records, the person's notes (answered as the real one
+/// answers them), and requests for access. It keeps every call it was sent.
+final class FakeStorage: @unchecked Sendable {
+    private let lock = NSLock()
+    struct Call { let method: String; let path: String; let body: Any? }
+    private var _calls: [Call] = []
+    private var _records: [String: (value: Any, updated: Date)] = [:]
+    private var _requests: [[String: Any]] = [["id": 3, "client": "Super Voice", "space": "user", "store": "memory", "access": "read", "state": "open", "why": "to greet people"]]
+    private var _grants: [[String: Any]] = []
+    private var _down = false
+    var calls: [Call] { lock.withLock { _calls } }
+    var down: Bool { get { lock.withLock { _down } } set { lock.withLock { _down = newValue } } }
+    var requests: [[String: Any]] { lock.withLock { _requests } }
+    var grants: [[String: Any]] { lock.withLock { _grants } }
+
+    func record(_ path: String) -> Any? { lock.withLock { _records[path]?.value } }
+    func set(_ path: String, _ value: Any, updated: Date = Date()) { lock.withLock { _records[path] = (value, updated) } }
+
+    var send: StorageSpaces.Send {
+        { [self] request in
+            let url = request.url!
+            let method = request.httpMethod ?? "GET"
+            let body = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0, options: [.fragmentsAllowed]) }
+            let down = lock.withLock { () -> Bool in
+                _calls.append(Call(method: method, path: url.path + (url.query.map { "?" + $0 } ?? ""), body: body))
+                return _down
+            }
+            if down { throw URLError(.cannotConnectToHost) }
+            func json(_ o: Any, _ status: Int = 200) -> (Data, Int) { (try! JSONSerialization.data(withJSONObject: o), status) }
+            let path = url.path
+            switch (method, path) {
+            case ("POST", "/api/clients/register"): return json(["ok": true, "key": "k3y"])
+            case ("GET", "/api/access/check"): return json(["ok": true, "allowed": true])
+            case ("POST", "/api/library"):
+                let b = body as? [String: Any] ?? [:]
+                return json(["ok": true, "op": b["op"] ?? "", "name": b["name"] ?? "", "text": "- bread (from Storage Spaces)"])
+            case ("GET", "/api/memory/recall"): return json(["ok": true, "found": true, "lines": ["| PEOPLE | ada"]])
+            case ("GET", "/api/access/requests"): return json(["ok": true, "requests": lock.withLock { _requests.filter { $0["state"] as? String == "open" } }])
+            case ("GET", "/api/access/grants"): return json(["ok": true, "grants": grants])
+            case ("POST", "/api/access/grants"):
+                let b = body as? [String: Any] ?? [:]
+                let g: [String: Any] = ["id": grants.count + 1, "client": b["to"] ?? "", "line": "\(b["to"] ?? "") may \(b["access"] ?? "") \((b["space"] as? String ?? "").uppercased())/\((b["store"] as? String ?? "").uppercased())"]
+                lock.withLock { _grants.append(g) }
+                return json(["ok": true, "grant": g])
+            default: break
+            }
+            if path.hasPrefix("/api/access/requests/"), method == "POST" {
+                let parts = path.split(separator: "/")
+                let n = Int(parts[3]) ?? 0, yes = parts[4] == "approve"
+                return lock.withLock {
+                    guard let k = _requests.firstIndex(where: { $0["id"] as? Int == n }) else { return json(["ok": false, "error": "there's no request \(n)"], 404) }
+                    _requests[k]["state"] = yes ? "approved" : "denied"
+                    if yes { _requests[k]["grant"] = ["line": "Super Voice may read USER/MEMORY"] }
+                    return json(["ok": true, "request": _requests[k]])
+                }
+            }
+            if path.hasPrefix("/api/access/grants/"), method == "DELETE" {
+                let id = Int(path.split(separator: "/").last ?? "") ?? 0
+                lock.withLock { _grants.removeAll { $0["id"] as? Int == id } }
+                return json(["ok": true])
+            }
+            if path.hasPrefix("/api/spaces/peter/") {
+                let key = String(path.dropFirst("/api/spaces/peter/".count)).replacingOccurrences(of: "/records/", with: "/")
+                if method == "PUT" {
+                    set(key, body ?? NSNull())
+                    return json(["ok": true, "version": 1])
+                }
+                guard let r = lock.withLock({ _records[key] }) else { return json(["ok": false, "code": "not_found"], 404) }
+                return json(["ok": true, "key": key, "value": r.value, "updated": r.updated.formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))])
+            }
+            return json(["ok": true, "said": "done on Storage Spaces"])
+        }
+    }
+}

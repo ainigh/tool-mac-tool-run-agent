@@ -19,7 +19,7 @@ final class PeterTests: XCTestCase {
         inbox = Inbox()
         var s = SayTranslator.Settings()
         s.on = false
-        peter = Peter(toolMac: ToolMac(fresh: 0, send: mac.send), translator: SayTranslator(file: nil, settings: s, send: model.send),
+        peter = Peter(toolMac: ToolMac(fresh: 0, send: mac.send), storage: StorageSpaces.none(), translator: SayTranslator(file: nil, settings: s, send: model.send),
                       schedule: Schedule(file: home.appendingPathComponent("schedule.json")), sayEvery: 5_000_000, deliver: inbox.deliver)
     }
 
@@ -31,7 +31,7 @@ final class PeterTests: XCTestCase {
     func withModel() {
         var s = SayTranslator.Settings()
         s.model = "llama3.2"
-        peter = Peter(toolMac: ToolMac(fresh: 0, send: mac.send), translator: SayTranslator(file: nil, settings: s, send: model.send),
+        peter = Peter(toolMac: ToolMac(fresh: 0, send: mac.send), storage: StorageSpaces.none(), translator: SayTranslator(file: nil, settings: s, send: model.send),
                       schedule: Schedule(file: home.appendingPathComponent("schedule.json")), sayEvery: 5_000_000, deliver: inbox.deliver)
     }
 

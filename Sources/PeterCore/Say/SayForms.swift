@@ -205,6 +205,36 @@ public enum SayForms {
                 next: ["What's scheduled"], kind: "schedule", action: .schedule(.cancel)),
     ]
 
+    // MARK: letting apps into Storage Spaces
+
+    static let anApp = "{an app}"
+    static let place = "{what of yours, like my memory}"
+
+    /// Peter's own, with Storage Spaces: who's asking for access, saying yes or no, letting an
+    /// app in, taking it back. Only the person (in Peter's window) says yes through him.
+    public static let access: [SayForm] = [
+        SayForm("Who's asking for access", "who's asking for access", also: ["what's waiting for my OK", "are there requests for access", "what apps are asking"],
+                words: "access request requests permission waiting approve storage spaces app apps asking",
+                about: "the apps asking to read or change a space of Storage Spaces that isn't theirs", next: ["Allow a request", "Turn down a request"],
+                kind: "access", action: .tool("access") { _ in ["op": "requests"] }),
+        SayForm("Allow a request", "allow request {its number}", also: ["approve request {its number}", "say yes to request {its number}"],
+                words: "allow approve yes request access permission grant", about: "a request for access, said yes to", changes: true,
+                kind: "access", action: .tool("access") { f in ["op": "approve", "number": f.at(0) ?? ""] }),
+        SayForm("Allow a request for an hour", "allow request {its number} for an hour", also: ["approve request {its number} for an hour"],
+                words: "allow approve hour while request access", about: "a request for access, said yes to for an hour", changes: true,
+                kind: "access", action: .tool("access") { f in ["op": "approve", "number": f.at(0) ?? "", "hours": 1] }),
+        SayForm("Turn down a request", "deny request {its number}", also: ["turn down request {its number}", "say no to request {its number}", "refuse request {its number}"],
+                words: "deny refuse no request access permission", about: "a request for access, said no to", changes: true,
+                kind: "access", action: .tool("access") { f in ["op": "deny", "number": f.at(0) ?? ""] }),
+        SayForm("Let an app in", "let \(anApp) [read | change] \(place)", also: ["allow \(anApp) to [read | change] \(place)", "give \(anApp) access to [read | change] \(place)"],
+                words: "let allow grant give access permission app read change write memory library mind space",
+                about: "an app let into a space of Storage Spaces (Super Face may read my memory)", changes: true,
+                kind: "access", action: .tool("access") { f in ["op": "grant", "app": f["an app"] ?? "", "access": f.chose.first == "change" ? "write" : "read", "place": f["what of yours, like my memory"] ?? ""] }),
+        SayForm("Take back an app's access", "stop letting \(anApp) in", also: ["take back \(anApp)'s access", "revoke \(anApp)'s access"],
+                words: "revoke take back access stop letting permission app", about: "every yes an app was given, taken back", changes: true,
+                kind: "access", action: .tool("access") { f in ["op": "revoke", "app": f["an app"] ?? ""] }),
+    ]
+
     // MARK: the folder's own
 
     /// How the examples that ship with the app are said (their files can't change without
@@ -382,14 +412,15 @@ public enum SayForms {
     /// Run has (on), and the folder's. With no catalog (Tool Mac Tool Run out of reach), the
     /// tools' are all offered: a call says it isn't answering.
     public static func all(catalog: Catalog?) -> [SayForm] {
-        guard let catalog, catalog.reachable else { return builtins + schedule + tools }
-        let have = Set(catalog.tools.map(\.name))
+        guard let catalog, catalog.reachable else { return builtins + schedule + tools + access }
+        // The library, MEMORY and the mind are Storage Spaces' own: offered whatever Tool Mac Tool Run has.
+        let have = Set(catalog.tools.map(\.name)).union(StorageSpaces.tools)
         let written = tools.filter { form in
             guard case let .tool(name, _) = form.action else { return true }
             return have.contains(name)
         }
         let covered = Set(tools.compactMap { f -> String? in if case let .tool(n, _) = f.action { return n }; return nil })
         let added = catalog.tools.filter { !covered.contains($0.name) && !unoffered.contains($0.name) }.map(made)
-        return builtins + schedule + written + added + folder(catalog)
+        return builtins + schedule + written + access + added + folder(catalog)
     }
 }

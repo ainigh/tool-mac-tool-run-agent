@@ -64,6 +64,9 @@ public actor SayTranslator {
 
         var isAnthropic: Bool { api.lowercased() == "anthropic" }
 
+        /// It's Ollama: an OpenAI-style address on Ollama's port (11434).
+        public var isOllama: Bool { !isAnthropic && (URL(string: url)?.port == 11434) }
+
         /// The settings changed by what was sent (`{"on", "api", "url", "model", "key", "timeout",
         /// "sure", "format", "effort"}`); a new `api` without a `url` or `model` takes that api's own.
         public func changed(by f: [String: Any]) throws -> Settings {
@@ -103,6 +106,11 @@ public actor SayTranslator {
             }
             if let v = string("effort")?.lowercased() { s.effort = v }
             return s
+        }
+
+        /// As they're kept in Storage Spaces (PETER/SETTINGS/model): everything but the key.
+        public var kept: [String: Any] {
+            ["on": on, "api": api, "url": url, "model": model, "timeout": timeout, "sure": sure, "format": format, "effort": effort]
         }
 
         /// As `GET /api/say/translator` shows them: the key only as whether there is one.
@@ -244,6 +252,26 @@ public actor SayTranslator {
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
         }
         return settings
+    }
+
+    /// When the settings' file was last written (nil: none, or kept in memory only).
+    public var savedAt: Date? {
+        file.flatMap { try? FileManager.default.attributesOfItem(atPath: $0.path)[.modificationDate] as? Date }
+    }
+
+    /// What "auto" was last taken as.
+    public var pickedModel: String? { picked?.model }
+
+    /// The models Ollama has (`GET /api/tags`, at the address the settings' URL has, else
+    /// Ollama's own), A to Z, the embedding ones left out: what the person picks from. Nil when
+    /// Ollama isn't answering.
+    public func ollamaModels() async -> [String]? {
+        var c = URLComponents(string: settings.isAnthropic ? Settings.ollama : settings.url) ?? URLComponents(string: Settings.ollama)!
+        c.path = "/api/tags"
+        c.query = nil
+        guard let url = c.url, let (data, status) = try? await send(URLRequest(url: url, timeoutInterval: 3)), (200..<300).contains(status),
+              let list = JSON.object(data)?["models"] as? [[String: Any]] else { return nil }
+        return list.compactMap { $0["name"] as? String }.filter { !$0.contains("embed") }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
     /// Whether it would be asked now.

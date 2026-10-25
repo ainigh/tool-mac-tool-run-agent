@@ -29,6 +29,8 @@ public final class Peter: @unchecked Sendable {
     }
 
     public let toolMac: ToolMac
+    /// Storage Spaces: his own things (PETER), and the person's library, MEMORY and mind.
+    public let storage: StorageSpaces
     public let translator: SayTranslator
     public let sayLog = SayLog()
     public let schedule: Schedule
@@ -38,9 +40,10 @@ public final class Peter: @unchecked Sendable {
     /// Delivers news to a client (tests give their own).
     let deliver: @Sendable (SayNews) async -> Bool
 
-    public init(toolMac: ToolMac = ToolMac(), translator: SayTranslator = SayTranslator(), schedule: Schedule = Schedule(), version: String = "dev",
-                sayEvery: UInt64 = 2_000_000_000, deliver: @escaping @Sendable (SayNews) async -> Bool = Peter.deliverLive) {
+    public init(toolMac: ToolMac = ToolMac(), storage: StorageSpaces = StorageSpaces(), translator: SayTranslator = SayTranslator(), schedule: Schedule = Schedule(),
+                version: String = "dev", sayEvery: UInt64 = 2_000_000_000, deliver: @escaping @Sendable (SayNews) async -> Bool = Peter.deliverLive) {
         self.toolMac = toolMac
+        self.storage = storage
         self.translator = translator
         self.schedule = schedule
         self.version = version
@@ -48,9 +51,122 @@ public final class Peter: @unchecked Sendable {
         self.deliver = deliver
     }
 
-    /// Starts the schedule's clock.
+    /// Starts the schedule's clock, after taking from Storage Spaces what it has newer than his
+    /// own files (the schedule, the model's settings, the runs he was following); then keeps his
+    /// things there as they change.
     public func start(onChange: (@Sendable () -> Void)? = nil) async {
+        await restoreFromStorage()
         await schedule.start(onDue: { [weak self] item, late in await self?.due(item, late: late) }, onChange: onChange)
+        started = Date()
+        storageLoop = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.keepInStorage()
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+            }
+        }
+    }
+
+    /// When he started (STATUS/now says so).
+    var started = Date()
+    var storageLoop: Task<Void, Never>?
+
+    // MARK: Storage Spaces
+
+    /// What Storage Spaces has that's newer than his own files: taken. Each it has none of, or
+    /// an older one: his own goes there (on the next `keepInStorage`).
+    func restoreFromStorage() async {
+        guard await storage.ready() else { return }
+        if let r = await storage.record("schedule", "schedule"), r.updated > (await schedule.savedAt ?? .distantPast) {
+            await schedule.restore(r.value)
+        }
+        if let r = await storage.record("settings", "model"), var fields = r.value as? [String: Any], r.updated > (await translator.savedAt ?? .distantPast) {
+            // The key never goes to Storage Spaces: the one here stays.
+            fields["key"] = nil
+            _ = try? await translator.change(fields)
+        }
+        if let r = await storage.record("following", "runs"), let list = (r.value as? [String: Any])?["clients"] as? [[String: Any]] {
+            for client in await sayLog.restore(list) { sayWatch(client) }
+        }
+    }
+
+    /// His things, as they are now, into his space (each only when it's changed).
+    func keepInStorage() async {
+        guard await storage.ready() else { return }
+        if let s = await schedule.snapshot() { await storage.mirror("schedule", "schedule", s) }
+        await storage.mirror("settings", "model", await translator.settings.kept)
+        await storage.mirror("following", "runs", ["clients": await sayLog.following()])
+        var now = await health()
+        now["started"] = JSON.date(started)
+        now["storage_spaces"] = nil
+        await storage.mirror("status", "now", now)
+    }
+
+    /// A storage tool (the library, MEMORY, the mind) straight on Storage Spaces; the rest, and
+    /// those while it isn't answering, on Tool Mac Tool Run.
+    /// The storage tools, and Peter's own about access.
+    static let accessTools: Set<String> = ["access"]
+
+    func callTool(_ name: String, _ args: [String: Any], why: String, async: Bool) async -> (Int, [String: Any]) {
+        if StorageSpaces.tools.contains(name), await storage.ready() {
+            let (status, json) = await storage.tool(name, args)
+            if status != 0 { return (status, json) }
+        }
+        return await toolMac.tool(name, args, why: why, async: async)
+    }
+
+    /// The clients that are the person (Peter's own window): only they say yes through Peter
+    /// (an app that asked can't have Peter say yes for it). Never taken from an HTTP request.
+    public static let personClients: Set<String> = ["Peter's window"]
+
+    /// Letting apps into Storage Spaces, in words: who's asking, yes or no, letting one in,
+    /// taking it back. Its answer is said (`said`).
+    func accessTool(_ args: [String: Any], client: String) async -> (Int, [String: Any]) {
+        guard await storage.ready() else {
+            return (503, ["ok": false, "error": await storage.problem ?? "Storage Spaces isn't answering. Is it open?"])
+        }
+        let op = args["op"] as? String ?? ""
+        let person = Self.personClients.contains(client)
+        if ["approve", "grant"].contains(op), !person {
+            return (403, ["ok": false, "error": "Only the person says yes to an app, in Peter's window or Storage Spaces' window: \(client) can't, through me."])
+        }
+        func number() -> Int? { Self.text(args["number"]).flatMap { Int($0.filter(\.isNumber)) } }
+        switch op {
+        case "requests":
+            let list = await storage.openRequests()
+            if list.isEmpty { return (200, ["ok": true, "said": "No app is asking for access."]) }
+            let lines = list.map { r -> String in
+                let why = (r["why"] as? String).map { " (\"\($0)\")" } ?? ""
+                return "request \(r["id"] ?? ""): \(r["client"] ?? "an app") asks to \(r["access"] ?? "read") \(StorageSpaces.placeName(r["space"] as? String ?? "", r["store"] as? String))\(why)"
+            }
+            return (200, ["ok": true, "said": "Waiting for a yes or a no:\n" + lines.map { "- " + $0 }.joined(separator: "\n") + "\nSay \"allow request N\" or \"deny request N\"."])
+        case "approve", "deny":
+            guard let n = number() else { return (400, ["ok": false, "error": "Say which request, by its number (\"who's asking for access\" lists them)."]) }
+            let (status, j) = await storage.decide(n, yes: op == "approve", hours: (args["hours"] as? NSNumber)?.doubleValue)
+            guard (200..<300).contains(status) else { return (status, j) }
+            let r = j["request"] as? [String: Any] ?? [:]
+            let place = StorageSpaces.placeName(r["space"] as? String ?? "", r["store"] as? String)
+            if op == "deny" { return (200, ["ok": true, "said": "Turned down request \(n): \(r["client"] ?? "the app") may not \(r["access"] ?? "read") \(place)."]) }
+            let line = (r["grant"] as? [String: Any])?["line"] as? String ?? "\(r["client"] ?? "The app") may \(r["access"] ?? "read") \(place)"
+            return (200, ["ok": true, "said": "Said yes to request \(n): " + line + "."])
+        case "grant":
+            let app = (args["app"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+            guard !app.isEmpty else { return (400, ["ok": false, "error": "Say which app."]) }
+            guard let (space, store) = StorageSpaces.place(args["place"] as? String ?? "") else {
+                return (400, ["ok": false, "error": "Say what of yours: my library, my memory, the mind, or Super Face's prompt or memory."])
+            }
+            let (status, j) = await storage.grant(to: app, space: space, store: store, access: args["access"] as? String ?? "read")
+            guard (200..<300).contains(status) else { return (status, j) }
+            return (200, ["ok": true, "said": ((j["grant"] as? [String: Any])?["line"] as? String ?? "\(app) is let in") + "."])
+        case "revoke":
+            let app = (args["app"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+            guard !app.isEmpty else { return (400, ["ok": false, "error": "Say which app."]) }
+            let (status, j) = await storage.revoke(app)
+            guard (200..<300).contains(status) else { return (status, j) }
+            let n = j["count"] as? Int ?? 0
+            return (200, ["ok": true, "said": n == 0 ? "\(app) wasn't let in anywhere beyond its own space." : "Took back what \(app) was let into (\(n)). It keeps its own space."])
+        default:
+            return (400, ["ok": false, "error": "There's no access op \(op)."])
+        }
     }
 
     // MARK: the HTTP API
@@ -170,9 +286,12 @@ public final class Peter: @unchecked Sendable {
         var tm: [String: Any] = ["url": await toolMac.url, "reachable": c.reachable, "tools": c.tools.count, "scripts": c.scripts.count, "flows": c.flows.count]
         if let e = c.error { tm["error"] = e }
         if let v = c.version { tm["version"] = v }
-        return ["ok": true, "service": Self.service, "version": version, "tool_mac_tool_run": tm,
-                "model": ["on": s.on, "api": s.api, "model": s.model, "ready": await translator.ready, "working": await translator.working > 0],
-                "scheduled": await schedule.items.count]
+        var st: [String: Any] = ["url": storage.url, "ready": await storage.ready(), "key": await storage.hasKey]
+        if let p = await storage.problem { st["problem"] = p }
+        var model: [String: Any] = ["on": s.on, "api": s.api, "model": s.model, "ready": await translator.ready, "working": await translator.working > 0]
+        if let picked = await translator.pickedModel { model["picked"] = picked }
+        return ["ok": true, "service": Self.service, "version": version, "tool_mac_tool_run": tm, "model": model,
+                "scheduled": await schedule.items.count, "storage_spaces": st]
     }
 
     /// What `GET /api/say` says: how to talk to Peter, for a person setting a client up.
@@ -501,7 +620,7 @@ public final class Peter: @unchecked Sendable {
     static func failed(_ status: Int, _ json: [String: Any]) -> Bool { status < 200 || status >= 400 || json["ok"] as? Bool == false }
 
     func sayTool(_ name: String, _ args: [String: Any], _ form: SayForm, _ filled: SayFilled, said: String, _ ctx: SayContext, mending: Bool) async -> SayReply {
-        let (status, json) = await toolMac.tool(name, args, why: Self.sayWhy(ctx.client, said), async: form.asks)
+        let (status, json) = name == "access" ? await accessTool(args, client: ctx.client) : await callTool(name, args, why: Self.sayWhy(ctx.client, said), async: form.asks)
         let what = Self.what(form, filled, said: said)
         if form.asks {
             return await sayWaiting(status, json, form: form, filled: filled, what: what, short: what, said: said, ctx, mending: mending)
@@ -948,14 +1067,14 @@ public final class Peter: @unchecked Sendable {
     /// "what can you do": a few lines of what there is, each a template to say.
     static func overview(_ ctx: SayContext) -> String {
         func line(_ title: String) -> String? { ctx.form(title).map { $0.isInline ? "- " + $0.short : "- " + $0.title.lowercased() + " (say it, and I'll show you its lines)" } }
-        let tools = ["Search the web", "Read a web page", "Open a page in Chrome", "Remember something", "Recall something", "Read a note", "Remind me", "Do something later"].compactMap(line)
+        let tools = ["Search the web", "Read a web page", "Open a page in Chrome", "Remember something", "Recall something", "Read a note", "Remind me", "Do something later", "Who's asking for access"].compactMap(line)
         let folder = ctx.forms.filter { $0.kind == "script" || $0.kind == "flow" }
         var out = "Say what you want, in your own words. If I'm not sure, I'll answer with a few templates to fill in and say back.\n\nSome of what you can say:\n" + tools.joined(separator: "\n")
         if !folder.isEmpty {
             let some = folder.prefix(3).map { "- " + $0.short }
             out += "\n\nThe Mac also has \(folder.count) script\(folder.count == 1 ? "" : "s") and flow\(folder.count == 1 ? "" : "s"), like:\n" + some.joined(separator: "\n")
         }
-        if !ctx.catalog.reachable { out += "\n\nTool Mac Tool Run isn't answering right now, so nothing can be done on the Mac until it's open, with its API on." }
+        if !ctx.catalog.reachable { out += "\n\nTool Mac Tool Run isn't answering right now, so nothing can be run on the Mac until it's open, with its API on (your notes, MEMORY and the mind are Storage Spaces', and still answer)." }
         out += "\n\nAnd about what you've asked for: what have I asked for today · what happened to {something you asked for} · show me {something you asked for} · stop {something you asked for} · what's scheduled"
         return out
     }
@@ -1248,8 +1367,10 @@ public final class Peter: @unchecked Sendable {
 
     /// Who's asking: what it calls itself, else its User-Agent's product ("curl/8.4" → "curl").
     static func client(_ req: HTTPRequest, _ fields: [String: Any]) -> String {
-        if let named = text(fields["client"]).map({ clean($0, limit: 60) }), !named.isEmpty { return named }
-        if let named = req.header("x-client").map({ clean($0, limit: 60) }), !named.isEmpty { return named }
+        // The person's own names are never an app's (an app can't say yes for itself through Peter).
+        func app(_ n: String) -> String { personClients.contains(n) ? n + " (an app)" : n }
+        if let named = text(fields["client"]).map({ clean($0, limit: 60) }), !named.isEmpty { return app(named) }
+        if let named = req.header("x-client").map({ clean($0, limit: 60) }), !named.isEmpty { return app(named) }
         if let agent = req.header("user-agent"), let product = agent.split(separator: " ").first?.split(separator: "/").first {
             let p = clean(String(product), limit: 40)
             if !p.isEmpty { return p }

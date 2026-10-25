@@ -35,7 +35,7 @@ final class PeterModel: ObservableObject {
     static let shared = PeterModel()
 
     /// Who the window is, to Peter: a client like any other, forgotten when the window closes.
-    static let windowClient = "Peter's window"
+    static let windowClient = Peter.personClients.first!
 
     let peter: Peter
     let server: APIServer
@@ -55,6 +55,16 @@ final class PeterModel: ObservableObject {
     }
     @Published var toolMacURL = UserDefaults.standard.string(forKey: "toolMacURL") ?? ToolMac.defaultURL
     @Published private(set) var modelSettings = SayTranslator.Settings()
+    /// The models Ollama has (nil: it isn't answering): the only ones the window offers.
+    @Published private(set) var ollamaModels: [String]?
+    /// What "auto" was taken as last.
+    @Published private(set) var pickedModel: String?
+    /// The latest time his model was asked: what it was given.
+    @Published private(set) var lastCall: SayTranslator.Call?
+    /// The window's tab (the menu opens it on one).
+    @Published var tab = 0
+    /// The window is showing.
+    @Published var windowShown = false
 
     private var soundTimer: Timer?
     private var refreshTimer: Timer?
@@ -100,7 +110,22 @@ final class PeterModel: ObservableObject {
     func refresh() async {
         health = await peter.health()
         modelSettings = await peter.translator.settings
+        pickedModel = await peter.translator.pickedModel
+        lastCall = await peter.translator.calls.last
         schedule = await peter.schedule.list()
+    }
+
+    /// Asks Ollama what models it has.
+    func refreshModels() async {
+        ollamaModels = await peter.translator.ollamaModels()
+    }
+
+    /// Uses one of Ollama's models ("auto": the best it has): nil, or what's wrong.
+    func useOllama(_ name: String) async -> String? {
+        let s = modelSettings
+        // Ollama's own address, unless it's set to another Ollama already.
+        let url = !s.isOllama ? SayTranslator.Settings.ollama : s.url
+        return await changeModel(["api": "openai", "url": url, "model": name])
     }
 
     func refreshSchedule() {
@@ -249,11 +274,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         } else {
             info("Tool Mac Tool Run isn't answering")
         }
-        info("Model: \((m["on"] as? Bool) == false ? "off" : (m["model"] as? String ?? "?"))\((m["ready"] as? Bool) == false ? " (out of reach)" : "")")
+        let st = model.health["storage_spaces"] as? [String: Any] ?? [:]
+        info(st["ready"] as? Bool == true ? "Storage Spaces: his things, your notes and MEMORY" : "Storage Spaces isn't answering")
+        let shown = m["model"] as? String ?? "?"
+        let auto = shown == SayTranslator.Settings.auto ? (m["picked"] as? String).map { " (\($0))" } ?? "" : ""
+        info("Model: \((m["on"] as? Bool) == false ? "off" : shown + auto)\((m["ready"] as? Bool) == false ? " (out of reach)" : "")")
         menu.addItem(.separator())
-        action("Talk to Peter…", #selector(openWindow), key: "t")
+        action(window == nil ? "Talk to Peter…" : "Hide Peter's Window", #selector(toggleWindow), key: "t")
         let count = model.schedule.count
-        action(count == 0 ? "Nothing scheduled" : "Scheduled (\(count))…", #selector(openWindow))
+        action(count == 0 ? "Nothing scheduled" : "Scheduled (\(count))…", #selector(openSchedule))
         menu.addItem(.separator())
         let login = NSMenuItem(title: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
@@ -278,26 +307,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         action("Quit Peter", #selector(quit), key: "q")
     }
 
-    @objc func openWindow() {
+    /// The menu's one switch for the window: shown, it goes (and what was said in it is
+    /// forgotten); not shown, it comes, in front of every other window, and stays there (it has
+    /// no close button, and doesn't go when another app is used) until the menu says otherwise.
+    @objc func toggleWindow() {
         MainActor.assumeIsolated {
-            if window == nil {
-                let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 640), styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
-                w.title = "Peter"
-                w.isReleasedWhenClosed = false
-                w.contentViewController = NSHostingController(rootView: PeterView().environmentObject(PeterModel.shared).environmentObject(PeterModel.shared.updater))
-                w.delegate = self
-                w.center()
-                window = w
-            }
-            NSApp.activate(ignoringOtherApps: true)
-            window?.makeKeyAndOrderFront(nil)
+            if window != nil { hideWindow() } else { showWindow(tab: 0) }
         }
+    }
+
+    /// The schedule: the window on its tab (shown already: it stays, on that tab).
+    @objc func openSchedule() {
+        MainActor.assumeIsolated { showWindow(tab: 1) }
+    }
+
+    @MainActor
+    private func showWindow(tab: Int) {
+        PeterModel.shared.tab = tab
+        if window == nil {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 660), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+            w.title = "Peter"
+            w.isReleasedWhenClosed = false
+            w.level = .floating
+            w.hidesOnDeactivate = false
+            w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            w.contentViewController = NSHostingController(rootView: PeterView().environmentObject(PeterModel.shared).environmentObject(PeterModel.shared.updater))
+            w.delegate = self
+            w.center()
+            window = w
+        }
+        PeterModel.shared.windowShown = true
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
+    }
+
+    @MainActor
+    private func hideWindow() {
+        window?.close()
     }
 
     /// The window closed: what was said in it is forgotten.
     func windowWillClose(_ notification: Notification) {
         MainActor.assumeIsolated {
             PeterModel.shared.forget()
+            PeterModel.shared.windowShown = false
             window = nil
         }
     }
