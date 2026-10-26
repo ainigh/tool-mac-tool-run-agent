@@ -33,10 +33,11 @@ words; if Peter says he can't, it tells the user, or asks another way.
 
 2. **Peter remembers nothing between messages.** Each message is complete and atomic. A client
    that wants to refine something asks again, whole. Peter's model sees the instructions, the one
-   message and its own tool calls for it; nothing else. The client doesn't have to be told this in
-   its own instructions: when Peter asks for something or can't do it, his answer ends with *I
-   don't keep our conversation: send the whole request again.* (Only then: on every answer it
-   would be noise in the client's history.)
+   message and its own tool calls for it; nothing else. The client's own instructions say so
+   (Super Face's system prompt does). His answers used to end with *I don't keep our conversation:
+   send the whole request again* when he needed something, but his model added it after jobs done
+   too, and Super Face took it for failure (the dry runs, runs A and B): it's gone. How a request
+   went is the `X-Peter-Outcome` header, from what his tools did: done, asked, nothing or error.
 
 3. **Peter's jobs aren't conversation.** What he started and is still following (a run waiting for
    Run on the Mac, or running) and the schedule are kept, so he can say how they went and do

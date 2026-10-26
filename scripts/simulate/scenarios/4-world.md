@@ -1,4 +1,3 @@
-Time now: Sunday 25 October 2026, 21:40, Austin TX (CDT). Client: Super Face. It gave a reply address.
-This client's requests so far: none today.
-Notes there are: "groceries" (text: "- eggs\n- oat milk\n- coffee\n- rice"), "packing list", "Super Face playbook" (empty), "Super Face instructions" (empty), "ideas". There is NO note called "grocery list" or "shopping list".
-Tool Mac Tool Run's library answers a read of a note that doesn't exist with: "There's no note called <name>." (a failure, so his reader is asked why, per the brief).
+The time: see "Now:". Austin, TX (CDT). The client is Super Face, with a call-back address.
+The person's notes (library): "groceries" (text: "- eggs\n- oat milk\n- coffee\n- rice"), "packing list", "ideas". There is no note called "grocery list" or "shopping list"; library find "grocery" gives "groceries" first. A read of a note that isn't there: error "There's no note called <name>", with "fix": "find it by a few words".
+Super Face's notes (space_notes): super/prompt "instructions" and super/memory "playbook" are empty.

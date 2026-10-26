@@ -91,8 +91,9 @@ sequenceDiagram
   if you had answered, and so does what you say. Peter's messages go to the model at once, even
   while you're talking; what you say goes when you finish, and its answer to you is spoken at once.
 - **Peter keeps no conversation.** Each message is complete and atomic. His model sees his
-  instructions, the one message and its own tool calls for it; never a history. When he asks for
-  something or can't do it, his answer says to send the whole request again. What he does keep is
+  instructions, the one message and its own tool calls for it; never a history (Super Face's
+  prompt tells its model so). How a request went is his answer's `X-Peter-Outcome` header (done,
+  asked, nothing, error), from what his tools did, never guessed from his words. What he does keep is
   operational: the runs he's following (so he can call back when they end) and the schedule (on
   disk, and in his space in Storage Spaces).
 - **Peter does the translating.** There are no templates: every request goes to his model, which

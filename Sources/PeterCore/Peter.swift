@@ -176,7 +176,7 @@ public final class Peter: @unchecked Sendable {
 
     /// Every route there is: `GET /api` lists them.
     public static let routes: [(String, String, String)] = [
-        ("POST", "/api/say", "say what you want, in plain words, as text (text/plain, or {\"text\"}): the answer is plain text. Each message is whole in itself: nothing said before goes with it. ?client= (or X-Client): who's talking. X-Reply-To (an http address on this Mac): where to be told the moment a run is over, and when something scheduled is due"),
+        ("POST", "/api/say", "say what you want, in plain words, as text (text/plain, or {\"text\"}): the answer is plain text, and how it went is its X-Peter-Outcome header (done, asked: a run waits for Run on the Mac, nothing: he needs something or can't, error). Each message is whole in itself: nothing said before goes with it. ?client= (or X-Client): who's talking. X-Reply-To (an http address on this Mac): where to be told the moment a run is over, and when something scheduled is due"),
         ("GET", "/api/say", "how to talk to Peter, as text"),
         ("GET", "/api/say/log", "what this client asked for, and how each went (JSON, the newest first)"),
         ("POST", "/api/say/stop", "call off one of this client's requests by its number {\"number\": 3}"),
@@ -226,7 +226,8 @@ public final class Peter: @unchecked Sendable {
             } else {
                 text = req.body.isEmpty ? (req.query["text"] ?? req.query["q"] ?? "") : String(decoding: req.body, as: UTF8.self)
             }
-            return Self.plainText(await say(text, client: client))
+            let said = await sayWithOutcome(text, client: client)
+            return Self.plainText(said.text, headers: [("X-Peter-Outcome", said.outcome.rawValue)])
         case ("GET", "/api/say"):
             return Self.plainText(Self.howTo)
         case ("GET", "/api/say/log"):
@@ -313,10 +314,17 @@ public final class Peter: @unchecked Sendable {
     struct SayReply {
         var answer: String
         var about: [Int] = []
+        /// How it went, from what his tools did.
+        var outcome: Outcome = .done
     }
 
     /// Everything a reply says: the news, then the answer.
     public func say(_ text: String, client: String) async -> String {
+        await sayWithOutcome(text, client: client).text
+    }
+
+    /// The reply, and how the request went (`X-Peter-Outcome` over HTTP).
+    public func sayWithOutcome(_ text: String, client: String) async -> (text: String, outcome: Outcome) {
         var news = await sayNews(client, tell: true)
         let reply = await sayAnswer(text, client: client)
         await sayLog.with(client) { $0.lastSpoke = Date() }
@@ -328,7 +336,7 @@ public final class Peter: @unchecked Sendable {
         }
         parts.append(SayWords.whole(reply.answer))
         if await sayLog.needsWatch(client) { sayWatch(client) }
-        return parts.joined(separator: "\n\n")
+        return (parts.joined(separator: "\n\n"), reply.outcome)
     }
 
     static func capitalized(_ s: String) -> String {
@@ -798,8 +806,8 @@ public final class Peter: @unchecked Sendable {
 
     // MARK: reading what was sent
 
-    static func plainText(_ s: String, status: Int = 200) -> HTTPResponse {
-        HTTPResponse(status: status, contentType: "text/plain; charset=utf-8", data: Data((s.hasSuffix("\n") ? s : s + "\n").utf8))
+    static func plainText(_ s: String, status: Int = 200, headers: [(String, String)] = []) -> HTTPResponse {
+        HTTPResponse(status: status, contentType: "text/plain; charset=utf-8", data: Data((s.hasSuffix("\n") ? s : s + "\n").utf8), headers: headers)
     }
 
     /// A string, or a number or true/false as written.
