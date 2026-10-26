@@ -158,6 +158,24 @@ the second time.
 4. Then run A and B again, and then with qwen3:8b itself (both models, through Ollama), which is
    the test that matters.
 
+Items 1 to 3, and the smaller ones, are now done: see below.
+
+### Fixes applied (after runs A and B)
+
+Made in both apps; not yet run through the scenarios again.
+
+| Finding | What changed |
+|---|---|
+| 1. "Send the whole request again" read as failure | **Peter**: the closing line is gone, from his model's instructions and from his own answers (an empty request, an error). How a request went is now the `X-Peter-Outcome` header on `POST /api/say`, worked out by his code from his tool calls, never from his words: `asked` (a run was put on the Mac), `done` (a tool did something), `nothing` (no tool did anything: he needs something, can't, or said how to ask), `error` (he couldn't finish). **Super Face**: `peter.say()` reads it; "Peter didn't do that" is added only for `nothing` or `error`, and not when the model had asked "how would I ask you to …?"; a run is followed when the outcome is `asked`, whatever the words. `troubled()` stays only for a Peter too old to send the header. |
+| Peter keeps no conversation | **Super Face's system prompt** now says it: "He remembers nothing: each message is all he has, so make it whole, with every detail (never "yes", "the second one" or "as before"), and when he needs something, send the whole request again with it." |
+| 2. The fold cuts Super Face's notes | **Super Face**: its notes (Peter didn't do that, only your first message was sent, out of rounds) are messages of their own after Peter's answer, so folding his answer never cuts one. |
+| 3. Peter's model does more than it's asked | **Peter's instructions**: "Do only what's asked. Don't start a run, drive Chrome, show a window or write anything the request didn't ask for: if that's what it would take, say so, and how to ask for it." and "A message for someone else (a text, an email, a note to them) goes word for word as given: add nothing, change nothing." **Super Face's prompt**: "A message for someone else goes to him in the exact words to send." |
+| 4. Word for word can lack what it refers to | **Super Face's prompt**: standing instructions go to Peter word for word, "saying in brackets what it refers to when the words alone don't (which store, which person)". |
+| 5. Telling the user before Peter answers | **Super Face's prompt**: "Before Peter answers, tell the user only what you're doing ("Let me check."), never how it turned out." and "What waits for the user to click Run on the Mac is asked for, not done." |
+| 6. Tool names in Peter's answers | **Peter's instructions**: "never a tool's name (say "fill in the search in Chrome", not "straw")". |
+
+Tests: Peter's 22 pass (Swift 6.1 on Linux), with a new one for the outcome (a job done that says what it couldn't find is `done`; a run put in any words is `asked`; no tool, or every tool failing, is `nothing`; his model out of reach is `error`). Super Face's pass (73; `keep-clear.test.mjs` needs the `three` package, which isn't installed in this checkout, before and after), with new ones: no critic after a job done; a run followed though Peter said "I've asked for"; no critic after "how would I ask you…?"; the note whole after the fold. The kit follows: `harness.mjs` reads Peter's outcome (the stand-in writes it at the end of its log, as his code works it out) and adds the notes as their own messages.
+
 ## How it's run (and how to run it again)
 
 Everything either side reads comes from the code of the three apps, by

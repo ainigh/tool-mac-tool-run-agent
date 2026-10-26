@@ -44,8 +44,7 @@ const unquote = (s) => s.replace(/\\"/g, '"').replace(/\\\((\w+)\)/g, '{$1}');
 /** Peter's model's instructions, as Agent.swift writes them, with Tool Mac Tool Run's guide after. */
 function instructions() {
   const agent = fs.readFileSync(path.join(peterRepo, 'Sources/PeterCore/Agent.swift'), 'utf8');
-  const forgetful = agent.match(/static let forgetful = "((?:[^"\\]|\\.)*)"/)[1];
-  let out = agent.match(/var out = """\n([\s\S]*?)\n\s*"""/)[1].replace(/^ {8}/gm, '').replace(/\\\(forgetful\)/g, unquote(forgetful));
+  let out = agent.match(/var out = """\n([\s\S]*?)\n\s*"""/)[1].replace(/^ {8}/gm, '');
   const guide = [...toolsSource().match(/public static let guide: \[String\] = \[([\s\S]*?)\n {4}\]/)[1].matchAll(/^\s*"((?:[^"\\]|\\.)*)",?$/gm)].map((m) => unquote(m[1]));
   if (guide.length) out += `\n\nAbout Tool Mac Tool Run's tools:\n${guide.map((g) => `- ${g}`).join('\n')}`;
   return out;

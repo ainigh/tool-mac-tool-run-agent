@@ -5,7 +5,8 @@
 //
 //   node scripts/simulate/harness.mjs user  conv.md "what the user said" [at]
 //   node scripts/simulate/harness.mjs model conv.md answer.txt     the model's answer (anything after a line "=====" is dropped)
-//   node scripts/simulate/harness.mjs peter conv.md answer.txt [at] Peter's answer to the message the model sent
+//   node scripts/simulate/harness.mjs peter conv.md answer.txt [at] Peter's answer to the message the model sent;
+//                                                                  his outcome (X-Peter-Outcome) is the line "OUTCOME: …" after =====
 //   node scripts/simulate/harness.mjs news  conv.md "Meanwhile: …" [at]   Peter calling back by himself
 //
 // `model` prints what happened as JSON: the message for Peter (the first one only, as the app
@@ -22,7 +23,7 @@ const faceRepo = path.resolve(process.env.SUPER_FACE || path.join(here, '../../.
 const load = (f) => import(pathToFileURL(path.join(faceRepo, 'src/main', f)).href);
 const { addressed, isSilent, looksLikeCall, messages, words } = await load('calls.mjs');
 const { NOTE, claimsInability, peterMessage, promisesWork, userMessage } = await load('prompt.mjs');
-const { troubled } = await load('peter.mjs');
+const { asksHow, notDone } = await load('peter.mjs');
 
 const MODEL = process.env.MODEL || 'qwen3:8b';
 const MAX_ROUNDS = 10;
@@ -81,21 +82,26 @@ if (cmd === 'user' || cmd === 'news') {
     }
   } else {
     state.calls++;
-    state.pending = { more: found.length > 1 };
+    state.pending = { more: found.length > 1, how: asksHow(found[0].text) };
     out.toPeter = found[0].text;
     if (!found[0].text) out.empty = NOTE.empty();
   }
 } else if (cmd === 'peter') {
-  let reply = text(arg).split(/^=====\s*$/m)[0].trim();
-  const failed = troubled(reply);
+  const [said, log = ''] = text(arg).split(/^=====\s*$/m);
+  const reply = said.trim();
+  const outcome = (log.match(/^\s*OUTCOME:\s*(\w+)/im)?.[1] || '').toLowerCase();
+  // assistant.mjs ask(): his outcome decides, and a "how would I ask you…?" answered is what was wanted.
+  let failed = notDone(reply, outcome);
+  if (failed && outcome !== 'error' && state.pending?.how) failed = false;
   if (failed) state.failures++;
-  if (state.pending?.more) reply += `\n\n${NOTE.onlyFirst()}`;
   state.rounds++;
-  if (failed && state.failures <= 2) reply += `\n\n${NOTE.review}`;
-  if (state.rounds >= MAX_ROUNDS) reply += `\n\n${NOTE.outOfRounds(MAX_ROUNDS)}`;
-  state.pending = null;
+  // His answer, then the app's notes, each a message of its own.
   blocks.push({ role: 'user', content: peterMessage(reply, { at, model: MODEL }) });
-  out.failed = failed;
+  if (state.pending?.more) blocks.push({ role: 'user', content: NOTE.onlyFirst() });
+  if (failed && state.failures <= 2) blocks.push({ role: 'user', content: NOTE.review });
+  if (state.rounds >= MAX_ROUNDS) blocks.push({ role: 'user', content: NOTE.outOfRounds(MAX_ROUNDS) });
+  state.pending = null;
+  Object.assign(out, { failed, outcome, follow: !failed && outcome === 'asked' });
 } else {
   console.error('user|model|peter|news conv.md text|file [at]');
   process.exit(2);

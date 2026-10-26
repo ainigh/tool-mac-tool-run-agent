@@ -2,10 +2,21 @@ import Foundation
 
 /// How a request is done: Peter's model is given his instructions, the client's message (who
 /// it's from, and the time), and his tools, and works it through; each tool it calls is done
-/// here. Nothing of one request goes into the next.
+/// here. Nothing of one request goes into the next (a client's own instructions say so: his
+/// answers don't). How it went is told by what his tools did, not by his words: `Outcome`.
 extension Peter {
-    /// What Peter says when he needs a client to ask again: he keeps no conversation.
-    public static let forgetful = "I don't keep our conversation: send the whole request again."
+    /// How a request went, from what his tools did (never from what his model says): sent with
+    /// the answer as `X-Peter-Outcome`, so a client needn't guess from the words.
+    public enum Outcome: String, Sendable {
+        /// A tool did what was asked (or found what was asked), and no run was asked for.
+        case done
+        /// A run was asked for on the Mac: it waits for the person to click Run, and the client is told how it went.
+        case asked
+        /// No tool did anything: he needs something, can't do it, or said how to ask.
+        case nothing
+        /// He couldn't work it through: his model out of reach, or too many steps.
+        case error
+    }
 
     /// The instructions: the same for every request (so a server can cache them), but for Tool
     /// Mac Tool Run's own guide to its tools.
@@ -16,12 +27,13 @@ extension Peter {
         - "How would I ask you to …?": do nothing. Say whether you can, and the exact words to ask with.
         - Something you need is missing or unclear: do nothing. Say what's missing, and how to ask, like "Ask again with the address: open https://… in Chrome."
         - You can't do it: say why, and what would work instead.
-        - When you ask for something, or can't do it, end with: "\(forgetful)"
+        - Do only what's asked. Don't start a run, drive Chrome, show a window or write anything the request didn't ask for: if that's what it would take, say so, and how to ask for it.
+        - A message for someone else (a text, an email, a note to them) goes word for word as given: add nothing, change nothing.
         - Use find before you guess which of the person's scripts or flows to run, and the web before you say you don't know.
         - A script, a flow or Flow code waits for the person to click Run on the Mac: start it and say "Asked for …". Don't wait for it: the client is told how it went when it's over.
         - Something for later ("remind me in 20 minutes…", "every weekday at 8, …"): schedule. What the client asked you for before, and how it went: requests.
         - The person's notes, MEMORY and the mind: library, remember, recall, memory, mind. Super Face's own notes (its standing instructions, its playbook): space_notes. Keep what you're asked to keep word for word.
-        - Answer in plain text: no markdown, no JSON, no tool names.
+        - Answer in plain text: no markdown, no JSON, and never a tool's name (say "fill in the search in Chrome", not "straw").
         """
         if !guide.isEmpty { out += "\n\nAbout Tool Mac Tool Run's tools:\n" + guide.map { "- " + $0 }.joined(separator: "\n") }
         return out
@@ -127,7 +139,7 @@ extension Peter {
     func sayAnswer(_ raw: String, client: String, scheduled: Schedule.Item? = nil) async -> SayReply {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
-            return SayReply(answer: "Say what you want done, in plain words, with every detail it needs. " + Self.forgetful)
+            return SayReply(answer: "Say what you want done, in plain words, with every detail it needs.", outcome: .nothing)
         }
         let catalog = await toolMac.catalog()
         let about = Numbers()
@@ -143,14 +155,21 @@ extension Peter {
         if let e = run.error {
             answer = "I couldn't do that: \(e)."
             if !catalog.reachable { answer += " (Tool Mac Tool Run isn't answering either.)" }
-            answer += " " + Self.forgetful
         }
         await sayLog.update(client, n) { [answer, error = run.error] e in
             e.state = error.map { .failed($0) } ?? .answered
             e.told = e.state.key
             e.result = answer
         }
-        return SayReply(answer: answer, about: about.all + [n])
+        return SayReply(answer: answer, about: about.all + [n], outcome: Self.outcome(run, catalog))
+    }
+
+    /// How a request went, from its tool calls: a run asked for, something done, or nothing.
+    static func outcome(_ run: Brain.Run, _ catalog: Catalog) -> Outcome {
+        if run.error != nil { return .error }
+        let worked = run.steps.filter { !$0.failed }
+        if worked.contains(where: { catalog.tool($0.name)?.asks ?? false }) { return .asked }
+        return worked.isEmpty ? .nothing : .done
     }
 
     /// One tool call of his model's, done: what it gave back (JSON, as the model reads it), and whether it failed.

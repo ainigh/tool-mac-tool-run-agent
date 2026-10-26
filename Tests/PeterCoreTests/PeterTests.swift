@@ -38,6 +38,12 @@ final class PeterTests: XCTestCase {
         return String(decoding: r.bodyData ?? Data(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Says something as a client, over HTTP, and gives back how it went (X-Peter-Outcome) with the words.
+    func sayOutcome(_ text: String, client: String = "Tester") async -> (outcome: String, text: String) {
+        let r = await peter.route(HTTPRequest(method: "POST", target: "/api/say", headers: ["Content-Type": "text/plain", "X-Client": client], body: Data(text.utf8)))
+        return (r.header("X-Peter-Outcome") ?? "", String(decoding: r.bodyData ?? Data(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
     func json(_ r: HTTPResponse) -> [String: Any] { JSON.object(r.bodyData ?? Data()) ?? [:] }
 
     /// The model says back what the last tool it called said (`said`), or its error.
@@ -63,7 +69,9 @@ final class PeterTests: XCTestCase {
         let system = messages[0]["content"] as? String ?? ""
         XCTAssertTrue(system.hasPrefix("You are Peter."), system)
         XCTAssertTrue(system.contains("\"How would I ask you to …?\": do nothing."), system)
-        XCTAssertTrue(system.contains(Peter.forgetful), system)
+        XCTAssertTrue(system.contains("- Do only what's asked."), system)
+        XCTAssertTrue(system.contains("goes word for word as given"), system)
+        XCTAssertFalse(system.contains("send the whole request again"), "a client's own instructions say he keeps no conversation: his answers don't")
         XCTAssertTrue(system.contains("- Use find before guessing a script's name."), "Tool Mac Tool Run's guide")
         let user = messages[1]["content"] as? String ?? ""
         XCTAssertTrue(user.hasPrefix("From: Tester\nNow: "), user)
@@ -82,9 +90,9 @@ final class PeterTests: XCTestCase {
     }
 
     func testNoConversationIsKept() async throws {
-        model.plays(.says("Which page? Ask again with the address: open https://… in Chrome. \(Peter.forgetful)"))
+        model.plays(.says("Which page? Ask again with the address: open https://… in Chrome."))
         let asked = await say("open the page")
-        XCTAssertTrue(asked.hasSuffix(Peter.forgetful), asked)
+        XCTAssertEqual(asked, "Which page? Ask again with the address: open https://… in Chrome.", "nothing added to it")
         model.plays(.says("Opened."))
         _ = await say("https://example.com")
         let messages = model.lastMessages
@@ -160,13 +168,37 @@ final class PeterTests: XCTestCase {
         model.plays(.call("web_search", ["q": "again"]))
         let endless = await say("keep searching")
         XCTAssertTrue(endless.hasPrefix("I couldn't do that: that took more than 8 steps, so I stopped"), endless)
-        XCTAssertTrue(endless.hasSuffix(Peter.forgetful), endless)
+        XCTAssertFalse(endless.contains("send the whole request again"), endless)
         // The model out of reach.
         model.fails = true
         let out = await say("search the web for cats")
         XCTAssertTrue(out.hasPrefix("I couldn't do that: my model couldn't be reached"), out)
         let log = json(await peter.route(HTTPRequest(method: "GET", target: "/api/say/log", headers: ["X-Client": "Tester"])))
         XCTAssertEqual((log["entries"] as? [[String: Any]])?.first?["state"] as? String, "failed")
+    }
+
+    func testHowItWentIsToldByWhatTheToolsDidNotByTheWords() async throws {
+        // Something done (whatever the words say it couldn't find).
+        model.plays(.call("web_search", ["q": "Lagos rain"]), .says("80% rain tomorrow. I couldn't find the hours it'll fall."))
+        let done = await sayOutcome("will it rain in Lagos tomorrow?")
+        XCTAssertEqual(done.outcome, "done", done.text)
+        // A run asked for, put in any words.
+        model.plays(.call("run_script", ["script": "nightly-backup.sh"]), .says("I've asked for the backup: it waits for you to click Run."))
+        let asked = await sayOutcome("back up my documents")
+        XCTAssertEqual(asked.outcome, "asked", asked.text)
+        // No tool called: he needs something, or said how to ask.
+        model.plays(.says("Which page? Ask again with the address: open https://… in Chrome."))
+        let needs = await sayOutcome("open the page")
+        XCTAssertEqual(needs.outcome, "nothing", needs.text)
+        // Every tool it called failed: nothing done.
+        model.plays(.call("teleport", ["to": "Lagos"]), .says("I can't do that."))
+        let cant = await sayOutcome("take me to Lagos")
+        XCTAssertEqual(cant.outcome, "nothing", cant.text)
+        // His model out of reach.
+        model.fails = true
+        let broken = await sayOutcome("search the web for cats")
+        XCTAssertEqual(broken.outcome, "error", broken.text)
+        XCTAssertFalse(broken.text.contains("send the whole request again"), broken.text)
     }
 
     func testACallWrittenAsWordsIsStillMade() async throws {

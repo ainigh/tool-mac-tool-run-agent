@@ -28,7 +28,7 @@ curl -s 'localhost:8770/api/say?client=My+App' -H 'Content-Type: text/plain' -d 
 
 # something missing: nothing is done, and he says how to ask
 curl -s 'localhost:8770/api/say?client=My+App' -d "open the page in Chrome"
-# Which page? Ask again with the address: open https://… in Chrome. I don't keep our conversation: send the whole request again.
+# Which page? Ask again with the address: open https://… in Chrome.        (X-Peter-Outcome: nothing)
 
 # what he can do, without doing it
 curl -s 'localhost:8770/api/say?client=My+App' -d "how would I ask you to show something on the person's screen?"
@@ -45,6 +45,7 @@ curl -s 'localhost:8770/api/say?client=My+App' -H 'X-Reply-To: http://127.0.0.1:
 | **Request** | `POST /api/say`, the words as the body (`Content-Type: text/plain`), or JSON `{"text": "…", "client": "…", "reply_to"?: "…"}` |
 | **Who's talking** | `?client=`, the `X-Client` header, `"client"`, else the User-Agent. Each client's requests are its own. |
 | **Answer** | `text/plain`, always `200`. A refusal or a failure is said in words. |
+| **How it went** | The `X-Peter-Outcome` header, from what his tools did (never from his words): `done` (something was done or found), `asked` (a run waits for the person to click Run on the Mac; the client is told how it went), `nothing` (no tool did anything: he needs something, can't, or said how to ask), `error` (he couldn't work it through: his model out of reach, too many steps). Go by it, not by the wording: an answer that did the job may still say what it couldn't find. |
 | **Told when it's over** | `X-Reply-To` (or `"reply_to"`): an `http` address on this Mac. The moment a run of this client's is over, or something it scheduled is due, it's POSTed there as `{"client", "text": "Meanwhile: …", "entries": [as /api/say/log has them]}`. What couldn't be delivered comes first in its next answer. |
 
 Every reply has up to two parts:
@@ -63,8 +64,8 @@ it's from, and the time), and the tool calls it makes for it. Nothing from befor
   text to keep. "Yes", "the second one" or "more" mean nothing to him.
 - To refine something, ask again, whole.
 - When something's missing or unclear, he does nothing, and says what's missing and how to ask.
-  When he can't, he says why, and what would work instead. Either way his answer ends: *I don't
-  keep our conversation: send the whole request again.*
+  When he can't, he says why, and what would work instead (`X-Peter-Outcome: nothing`). He doesn't
+  add that he keeps no conversation: a client's own instructions should say so (Super Face's do).
 - **"How would I ask you to …?"** is answered without doing anything: whether he can, and the
   exact words to ask with.
 
