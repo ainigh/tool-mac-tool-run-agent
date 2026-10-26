@@ -3,7 +3,7 @@ import Foundation
 /// What Peter keeps for each client: the requests it made in words (what, when, how each is
 /// going, the system's id for it, whether its result was shown), so he can follow a run, tell the
 /// client the moment it's over, and answer "what happened to …". Not a conversation: nothing
-/// said before changes how a request is read (but which templates a client uses, offered first).
+/// said before goes to his model with a new request.
 /// The log keeps a week, at most 200 requests a client; the latest 100 clients are kept. All of
 /// it lasts while the app runs.
 public actor SayLog {
@@ -52,7 +52,7 @@ public actor SayLog {
         public let asked: Date
         /// What the client said (its first line).
         public let said: String
-        /// The template it filled.
+        /// What kind of request it was: "said", a tool's name (a run), "reminder", "later".
         public let form: String
         /// What it asked for, in words: "the weather in Lagos", "remember something: Lagos trip".
         public var what: String
@@ -155,8 +155,6 @@ public actor SayLog {
     public struct Conversation: Sendable {
         public var entries: [Entry] = []
         public var lastSpoke: Date?
-        /// How many times each template was used.
-        public var used: [String: Int] = [:]
         /// Where to tell the client how its runs went, as it said (`reply_to`): nil, it hears at
         /// the start of its next reply.
         public var replyTo: URL?
@@ -201,7 +199,6 @@ public actor SayLog {
             e.told = state.key
             if !state.open { e.ended = Date() }
             c.entries.append(e)
-            c.used[form, default: 0] += 1
             return c.counter
         }
     }
@@ -240,7 +237,6 @@ public actor SayLog {
     public func reset(_ client: String) {
         with(client) { c in
             c.entries = []
-            c.used = [:]
         }
     }
 

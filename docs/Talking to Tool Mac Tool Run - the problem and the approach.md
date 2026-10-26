@@ -1,5 +1,9 @@
 # Talking to Tool Mac Tool Run: the problem and the approach
 
+> **Superseded (October 2026).** This is how Peter read requests into templates. He has no
+> templates any more: his model reads every request and does it with his tools. What was decided
+> instead, and why: [DECISIONS.md](../DECISIONS.md). Kept for the history of the approach.
+
 ## Where we are
 
 Tool Mac Tool Run serves scripts, flows, notes, memory, the web and the browser over a local HTTP
