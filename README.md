@@ -90,6 +90,8 @@ swift test                 # PeterCore, on any machine (Linux too)
 swift run Peter            # the app, on a Mac
 scripts/build-app.sh       # build/Peter.app and build/Peter.zip
 scripts/bench.py -m qwen3:8b -m llama3.2   # which model reads requests best (BENCH.md)
+node scripts/simulate/prompts.mjs peter    # a dry run of the chat with Super Face, no app running
+                                           # (docs/Simulated exchange - Super Face and Peter.md)
 ```
 
 | | |
