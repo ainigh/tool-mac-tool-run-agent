@@ -1,3 +1,2 @@
-Time now: Sunday 25 October 2026, 21:40, Austin TX (CDT). Client: Super Face. It gave a reply address.
-This client's requests so far: none today.
-Tool Mac Tool Run has no messaging, SMS, iMessage, WhatsApp or email tool, and no script for any of that. Its tools are exactly the templates in the brief. MEMORY: nothing about the user's wife (a recall of "wife" or "the user's wife" finds nothing). Chrome can open pages (and "Do steps in Chrome" can click and type, waiting for Run on the Mac); the user's Chrome is signed in to web.whatsapp.com, but nothing in MEMORY says who the wife is or her number.
+The time: see "Now:". Austin, TX (CDT). The client is Super Face, with a call-back address.
+Tool Mac Tool Run has no messaging, SMS, iMessage, WhatsApp, contacts or email tool, and no script for any of that (find "text message" or "whatsapp" finds nothing but straw and browser). MEMORY: recall "wife" or "the user" finds nothing about a wife. The person's Chrome is signed in to web.whatsapp.com (only a straw run would find that out, by opening it). straw waits for Run on the Mac; once run, it prints each step it did.

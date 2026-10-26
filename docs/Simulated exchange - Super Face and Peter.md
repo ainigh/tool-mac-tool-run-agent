@@ -1,13 +1,210 @@
 # Simulated exchange: Super Face and Peter
 
-A dry run of the chat of three ([PETER.md](https://github.com/ainigh/JUST-super-mac-tts-ONLY-service/blob/main/PETER.md)),
-with no app running and nothing called: one stand-in plays Super Face's model, given its real
-system prompt, and another plays Peter, given his real templates, his reader's prompt and the way
-his script words its answers. The point was to see whether the orchestration flows, and where it
-has blind spots. Six scenarios were run: the Walmart example from PETER.md, then five edge cases.
-**What was found is at the end: [Findings](#findings).**
+Dry runs of the chat of three (the user, Super Face's model, and Peter), with no app running and
+nothing called. One stand-in plays Super Face's model, given its real system prompt; another plays
+Peter's model, given his real instructions and tools; the harness between them is Super Face's own
+code. The point is to see whether the orchestration flows, and where it has blind spots.
 
-## How it was run (and how to run it again)
+There have been three runs of the same six scenarios:
+
+- **Run 1** (25 October), on the template design: Peter matched requests to templates, and Super
+  Face's prompt taught its model how to talk to him. [Run 1, below](#run-1-before-the-rewrite-templates).
+- **Runs A and B** (26 October), twice, on the rewrite ([DECISIONS.md](../DECISIONS.md)): Peter's model
+  does every request with his tools, and Super Face has a short prompt. Two runs, to tell what the
+  design does from what one model happened to do. **Their results are first.** Transcripts:
+  [Simulated exchange - runs A and B.md](Simulated%20exchange%20-%20runs%20A%20and%20B.md).
+
+## Runs A and B: after the rewrite
+
+### In short
+
+The rewrite fixed what run 1 found worst. Nothing asked for was dropped: Peter's model takes a
+whole request, with its "and tell me…", and does all of it. The model no longer needs to know what
+Peter has: "back up my documents" found the nightly backup script in both runs, through Peter's
+`find`. Every scenario ended with the user getting what they asked for, or knowing exactly what
+was waiting on them.
+
+What's left is mostly at the seam between the two: Super Face still decides whether Peter did
+something from his wording, and Peter's new closing line makes that guess wrong most of the time.
+That one thing caused most of what went wrong: false "Peter didn't do that" notes, a resent
+WhatsApp message that could have gone out twice, and runs Super Face doesn't follow.
+
+### Scenario by scenario
+
+| | Run 1 (templates) | Run A | Run B |
+|---|---|---|---|
+| S1 Walmart: open? till when tomorrow? show me | 2 failed messages, saved by Peter's mend; "tell me" dropped | ✅ 1 message: Peter found "near me" in MEMORY, searched, read, opened the page | ✅ same |
+| S1 "from now on, walmart → yes/no" | Saved, but worded so every use fails once | ✅ saved word for word; one extra check ("was anything lost?") | ✅ saved word for word |
+| S1 "walmart", two days later | "No.", after a failed call and a mend | ✅ "No." (after "Let me check.") | ✅ "No." (after "Let me check whether it's open.") |
+| S2 umbrella in Lagos | ✅ | ✅, but a false "didn't do that" note | ✅, but two false notes and an extra round for hourly rain |
+| S2 back up my documents | ❌ never found the script (4 messages, nothing done) | ✅ found and asked for `nightly-backup.sh`; news came, told the user | ✅ found it; Peter warned it keeps only 7 days (may delete older backups); the model asked the user first |
+| S3 reminder in 20 min, then 30 | New reminder silently dropped; caught by the model | ✅ Peter cancelled 3 and set 4 at 21:52 | ✅ same |
+| S4 "grocery list" (note is "groceries") | Failed, mended; a false "didn't work" note; said twice | ✅ 1 message, 1 answer | ✅ same |
+| S5 text my wife | Asked who; sent with Do steps in Chrome | ✅ "how would I ask you…?", asked the user, straw asked for, sent | ⚠️ asked the user; then a false "didn't do that" note made the model resend; Peter's model caught the duplicate |
+| S6 flights next Friday | 5 messages, looping; date never asked | ⚠️ date assumed; Peter started a Chrome search (straw) unasked; news came with one-way fares | ✅ asked "this Friday or next?" first; Peter's `show` window, then a straw on the second ask; news came |
+
+Messages to Peter: run 1, 24 for the six; run A, 13; run B, 15. Requests where something asked for
+was silently dropped: run 1, 3; runs A and B, none.
+
+### Findings
+
+#### 1. Peter's "send the whole request again" makes Super Face think he failed (high)
+
+Peter's instructions say: when he asks for something or can't do it, end with *"I don't keep our
+conversation: send the whole request again."* His model also added it when it had done the job
+(the umbrella, with "I couldn't find the hours"), and when it had started a run ("Asked for a
+Straw run… I don't keep our conversation: send the whole request again"). Super Face's `troubled()`
+counts that line as a failure. In the two runs, 9 "Peter didn't do that" notes were added; 2 were
+right (both times Peter needed the wife's name).
+
+What it caused:
+
+- **A resend that could have sent the text twice** (B, S5). Peter's model had asked for the
+  WhatsApp message (a Run card on the Mac). The note told the model he hadn't done it, so it asked
+  again. Peter's model checked `requests`, saw run 14 waiting, and didn't put up a second card. A
+  less careful model would have, and two clicks on Run would have sent it twice.
+- **Runs Super Face doesn't follow.** `ask()` follows a run only when `!failed && /\bAsked for\b/`.
+  Flagged as failed, the WhatsApp runs (A, B) and the flight searches (A, B) weren't followed: no
+  "It's waiting for you to click Run" after 20 seconds, no Cancel on the message, no state in the
+  chat. (The backup runs were followed: their answers didn't have the line.) The regex is also
+  case-sensitive: "I've asked for a Google Flights one-way search" (A, S6) wouldn't match even
+  without the line.
+- **The model was confused** each time ("his reply did answer the umbrella question, so it's unclear
+  whether that counts as a failure"), and in B (S2) made an extra round for hourly rain that
+  nobody needed.
+
+To close it: Peter says how a request went in a header (`X-Peter-Outcome: done | asked | needs |
+cannot | failed`) and Super Face reads that, not the words; or, at the least, Peter's code (not his
+model) adds the closing line only when no tool did anything, and `troubled()` and "Asked for" read
+the outcome. Run 1's finding 4, still open in a new form.
+
+#### 2. Super Face's fold cuts its own notes (medium)
+
+At the start of each request, `fold()` cuts Peter's earlier answers to 600 characters. Super Face's
+notes (the review note, "only your first message…") are added to the end of Peter's answer, so
+they're folded with it: "…if only the use… (cut short)", or gone entirely after a long answer (A
+and B, S6). Five stand-ins said they couldn't tell what the note had asked. Fold Peter's words
+only, and keep (or drop) the note whole: better, push the note as its own message.
+
+#### 3. Peter's model does more than it's asked (medium)
+
+- A, S6: asked for flights, it found only round trips and **started a straw run on its own** (a
+  Google Flights one-way search in Chrome), as the brief allows ("tell them what to do, or use
+  straw"). The Run click still guards it, but the user didn't ask for Chrome to be driven.
+- B, S6: it opened a `show` window in front of the user, unasked.
+- B, S5: asked to text "that the user is running about 15 minutes late", it typed *"Hi Ngozi, I'm
+  running about 15 minutes late."* Its own words in someone else's message.
+- Instructions for his model: do what's asked; anything that drives Chrome, shows a window or
+  writes in someone's name, only when asked for; a message to send is sent word for word.
+
+#### 4. What's stored word for word can lack what it needs (medium)
+
+The standing instruction went in exactly as said: "from now on whenever I say walmart just tell me
+yes if they're open and no if they're closed". Both runs then answered "No." correctly, but only
+because Sunday's exchange was still in the chat: the model knew which store from it. After a new
+chat, or once it's out of the 40 messages kept, "which Walmart" is gone (Peter's model would find
+one again from where the user lives, but not necessarily that one). The prompt says "word for
+word" with good reason (no reinterpretation); it could add: "with what it refers to, when the
+words alone don't say (which store, which person)". Run 1 had the opposite problem: the model
+wrote its own instruction, and wrote it badly.
+
+#### 5. Still telling the user before Peter answers (low now)
+
+"Okay, I'll start backing up your documents now." (A, S2; corrected later: "Correction: the backup
+hasn't started yet"); "From now on, when you say Walmart, I'll tell you…" (A and B, before the save);
+"so it goes off at 9:52" (B, S3). Fewer than run 1, and none wrong in the end, but the words before
+`@peter` are still spoken at once. The prompt's own example still has the model say "Sure, I'll
+remind you at 15:40" only after Peter answers, which is the right shape; it could say so in words.
+
+#### 6. Tool names leak into Peter's answers (low)
+
+"I can, with straw", "ask again with: use straw to fill in the Google Flights search…". His
+instructions say no tool names. In B (S6) the model called that suggestion "garbled" and didn't
+pass it on; the one way to the one-way fares was lost until Peter's model started the run itself
+the second time.
+
+#### 7. Small things
+
+- **"Let me check." before a one-word answer** (S1, both): the standing instruction said just yes
+  or no. The busy tone would cover the wait.
+- **"Tomorrow" across time zones** (B, S2): at 21:40 in Austin it's already Monday in Lagos; the model
+  asked Peter for both days. Harmless.
+- **An unneeded check** (A, S1): "it is now the only line in that note" made the model ask Peter
+  whether anything was lost.
+- **Peter's answers are long** (often over 600 characters), so they're folded in later requests;
+  his instructions say one to three sentences.
+- **The prompt's example uses "You:" labels**, and three stand-ins asked whether to write them; none
+  did.
+
+### Run 1's findings, now
+
+| Run 1 finding | Now |
+|---|---|
+| 1. Several requests in one message, Peter does only the first | **Fixed** by the rewrite: Peter's model does all of it |
+| 2. The model doesn't know what Peter has | **Fixed**: Peter's model uses `find`; "how would I ask you…?" works (A, S5) |
+| 3. Says it's done before Peter does it | **Better**, still there (finding 5) |
+| 4. `troubled()` misjudges | **Still open, worse** (finding 1) |
+| 5. Learning narrow, plain sentences, stale notes | **Changed**: the reflect step is gone; instructions go word for word (finding 4) |
+| 6. Doesn't know when to stop, or ask first | **Better**: B asked which Friday; A still assumed |
+| 7. Run card may show only the title | **Better**: the card's reason is the first line of Super Face's request, in words ("Super Face asked in words: “Text Ngozi, the user's wife, …”"). What straw will actually type ("Hi Ngozi, …") is in its steps: check that Tool Mac Tool Run's card shows them |
+
+### What to do next
+
+1. Peter's outcome in a header, read by Super Face for the review note and for following runs
+   (finding 1). It's the one change that would have removed most of what went wrong here.
+2. Super Face's notes as messages of their own, not folded into Peter's answer (finding 2).
+3. Two lines in Peter's instructions: only what's asked (no runs, windows or wording of his own),
+   and a message to send goes word for word (finding 3).
+4. Then run A and B again, and then with qwen3:8b itself (both models, through Ollama), which is
+   the test that matters.
+
+## How it's run (and how to run it again)
+
+Everything either side reads comes from the code of the three apps, by
+[`scripts/simulate/prompts.mjs`](../scripts/simulate/prompts.mjs), with the other two checkouts beside
+this one:
+
+```bash
+export TZ=America/Chicago
+NOW=2026-10-25T21:40:00 node scripts/simulate/prompts.mjs superface [notes.json] > sf-system.txt  # Super Face's system prompt
+node scripts/simulate/prompts.mjs peter > peter-brief.txt          # Peter's model's instructions and tools
+node scripts/simulate/prompts.mjs to-peter "…" 2026-10-25T21:40:06  # a message as his model gets it
+```
+
+- `superface` is `systemPrompt()` from Super Face's `src/main/prompt.mjs`, with the notes it reads
+  from Storage Spaces (`notes.json`: its standing instructions and playbook).
+- `peter` is `Peter.instructions` from `Agent.swift` with Tool Mac Tool Run's guide after it, then
+  every tool his model is given: Tool Mac Tool Run's (from its `ToolsAPI.swift`, with their
+  arguments, marked when they wait for Run) and his own (schedule, requests, access, space_notes).
+- [`scripts/simulate/harness.mjs`](../scripts/simulate/harness.mjs) is Super Face's harness, using its
+  own `calls.mjs`, `prompt.mjs` and `peter.mjs`: who an answer is to, only the first message to Peter
+  sent, the nudges, `troubled()` and the review note, the round limit, and the fold at each new
+  request. `user`, `model`, `peter` and `news` each add one turn to a conversation file.
+- Each turn is a fresh Claude Haiku subagent, with [`model-role.md`](../scripts/simulate/model-role.md)
+  (Super Face's model: the system prompt and the conversation) or
+  [`peter-role.md`](../scripts/simulate/peter-role.md) (Peter's model: his instructions, his tools and
+  the one message; it also plays the tools, from a world sheet in
+  [`scripts/simulate/scenarios/`](../scripts/simulate/scenarios/)). That's faithful to both apps:
+  Super Face sends its whole history every time, and Peter's model sees one message. After its
+  answer, each stand-in says what in its instructions was unclear; several findings came from that.
+- `transcript.mjs` turns a conversation file into a transcript.
+
+How faithful it is: Haiku is stronger than qwen3:8b, on both sides; whatever went wrong here will
+go wrong more on the real models, and some of what went right (Peter's model checking for the
+duplicate run) may not. What the tools gave back was made up by the Peter stand-in from the world
+sheet, so it's realistic, not real. The user's lines and the news of runs (as Peter's `newsLine`
+words them) were written by hand; one world sheet had a mistake (flight times that didn't add up
+across time zones, run A, S6), which the model caught and asked Peter about. Timing (the user
+talking over the model, news arriving mid-answer) isn't simulated.
+
+## Run 1: before the rewrite (templates)
+
+Run 1 was made on the template design, with an earlier version of the kit (it read Peter's
+templates from `SayForms.swift`, which is gone; it's in this repository's history, with the
+transcripts below). What it found led to the rewrite; [Run 1's findings, now](#run-1s-findings-now)
+says which are fixed. It's kept as it was written.
+
+### How run 1 was run
 
 Everything either side reads is taken from the code of both apps by
 [`scripts/simulate/prompts.mjs`](../scripts/simulate/prompts.mjs), so it doesn't drift from them:
@@ -43,7 +240,7 @@ TZ=America/Chicago node scripts/simulate/prompts.mjs user "is the walmart near m
   scenario: [`scripts/simulate/scenarios/`](../scripts/simulate/scenarios/).
 - `transcript.mjs` turns a conversation file into the transcripts below.
 
-### How faithful it is
+#### How faithful it is
 
 - **Where the Peter stand-in was kinder than his code, its answer was corrected to the code**, and
   the transcripts show the corrected one. Haiku kept reading a compound message as a model would
@@ -68,7 +265,7 @@ The setting for all of them: Sunday 25 October 2026, about 21:40 in Austin. MEMO
 @pref lives in Austin, TX 78745"; the playbook and the standing instructions start empty. The
 model is `qwen3:8b` (so it's `@qwen3`), and the character is called Ava.
 
-## The scenarios
+### The scenarios
 
 | | What's said | What it tests |
 |---|---|---|
@@ -79,7 +276,7 @@ model is `qwen3:8b` (so it's `@qwen3`), and the character is called Ava.
 | [S5](#s5-something-nobody-can-do-text-my-wife) | "text my wife that I'm running about 15 minutes late" | No tool for it; a question for the user; a run that waits for the click; news |
 | [S6](#s6-flights-from-austin-to-lagos) | "find me flights from austin to lagos next friday" | Several steps; a result that doesn't have what was asked; when to stop |
 
-### S1: the Walmart near me (baseline)
+#### S1: the Walmart near me (baseline)
 
 **You** (Sunday 25 October 2026, 21:40:03):
 > is the walmart near me still open? and when do they close tomorrow? let me see it
@@ -231,7 +428,7 @@ What happened, against PETER.md's version of it:
   no. (PETER.md's version says nothing until the answer: the busy tone plays instead.)
 - It said "Okay, from now on…" to the user before Peter had added the instruction.
 
-### S2: an umbrella in Lagos, then a backup
+#### S2: an umbrella in Lagos, then a backup
 
 **You** (Sunday 25 October 2026, 21:40:03):
 > gonna need an umbrella in lagos tomorrow?
@@ -335,7 +532,7 @@ What happened:
 - PETER.md's version has the model say "@peter run the nightly backup" straight away. Nothing in
   the system prompt makes that possible.
 
-### S3: a reminder, then changed
+#### S3: a reminder, then changed
 
 **You** (Sunday 25 October 2026, 21:20:05):
 > remind me to call my mom in 20 minutes
@@ -408,7 +605,7 @@ What happened:
 - "Make that 30 minutes instead" was taken as 30 minutes from now (21:52), not from when it was
   asked (21:50). Either reading is fair; it said which.
 
-### S4: a note by the wrong name
+#### S4: a note by the wrong name
 
 **You** (Sunday 25 October 2026, 21:40:03):
 > what's on my grocery list
@@ -504,7 +701,7 @@ What happened:
   request, so the line it had just added wasn't there, and it said it couldn't tell whether it was
   about to add it again.
 
-### S5: something nobody can do ("text my wife")
+#### S5: something nobody can do ("text my wife")
 
 **You** (Sunday 25 October 2026, 21:40:03):
 > text my wife that I'm running about 15 minutes late
@@ -606,7 +803,7 @@ What happened:
 - Then again two in one (remember Ngozi in MEMORY, and add a playbook line): Peter's reader took
   the first, the second was dropped without a word, and the model noticed and asked again.
 
-### S6: flights from Austin to Lagos
+#### S6: flights from Austin to Lagos
 
 **You** (Sunday 25 October 2026, 21:40:03):
 > find me flights from austin to lagos next friday
@@ -729,12 +926,12 @@ What happened:
 - Stopped here, with a fifth message on its way: another web search with the same instructions in
   it.
 
-## Findings
+### Findings
 
 Ranked by how much they'd hurt. Each says where it was seen, why it happens (in the code), and a
 way to close it. None of the fixes is made here: this is the log.
 
-### What worked
+#### What worked
 
 - **Addressing never broke.** Every answer was `@user …`, `@peter …` or both, in the right order,
   one message to Peter per answer; the one-message rule never had to cut anything. `@user nothing`
@@ -750,7 +947,7 @@ way to close it. None of the fixes is made here: this is the log.
 - The schedule's sentences ("remind me in 20 minutes: …", "remind me at 21:52 today: …") were read
   by their words, no model needed.
 
-### 1. The model asks for several things in one message, and Peter does only the first (high)
+#### 1. The model asks for several things in one message, and Peter does only the first (high)
 
 **Seen in every scenario: 15 of the 24 messages to Peter.** "Search the web for X, open the
 closest page, and tell me whether it's open"; "cancel number 3, then remind me at 21:52"; "read the
@@ -781,7 +978,7 @@ To close it, on both sides:
   take the address and say what was left. Either change makes it impossible for a dropped request
   to pass unseen.
 
-### 2. The model doesn't know what Peter can do (high)
+#### 2. The model doesn't know what Peter can do (high)
 
 Seen in S2 (and behind S5 and S6). Asked to back up the documents, the model had no way to know
 there's a "Nightly backup" script: since Super Face stopped loading Tool Mac Tool Run's tools, its
@@ -804,7 +1001,7 @@ To close it:
 - Peter: match "back up" to "backup" (and the like) when searching, and keep his reader's
   question in the offer when it has one.
 
-### 3. It tells the user it's done before Peter has done it (high)
+#### 3. It tells the user it's done before Peter has done it (high)
 
 Seen in S1, S3 (twice), S5. "Sure, I'll remind you in 20 minutes, at 9:40", "Okay, I'll move it to
 9:52", "Let me text her now", "Okay, from now on…": the words before `@peter` are said aloud the
@@ -819,7 +1016,7 @@ me set that.", "One moment."), never how it turned out. In the harness, `nudgeFo
 answers without a message to Peter; a check for an outcome said before Peter answered ("done",
 "set for", "I'll remind you at", "it's sent") could hold those words back until he does.
 
-### 4. "Did it work?" is read from Peter's wording, and gets it wrong both ways (medium)
+#### 4. "Did it work?" is read from Peter's wording, and gets it wrong both ways (medium)
 
 `troubled()` (Super Face, `src/main/peter.mjs`) decides from a regex over Peter's answer. Run on
 the answers from this dry run:
@@ -839,7 +1036,7 @@ To close it: let Peter say the outcome, not just the words: a header on `/api/sa
 (`X-Peter-Outcome: done | asked | offered | failed`, with `mended` when "Tried instead" worked),
 and Super Face reads that instead of the regex.
 
-### 5. What it learns is narrow, written in plain sentences, and checked against stale notes (medium)
+#### 5. What it learns is narrow, written in plain sentences, and checked against stale notes (medium)
 
 - The lines it wrote were about the case, not the lesson: "the grocery list is the note called
   groceries; read it in a single request", "to show a page, ask for only open <url>…". The real
@@ -858,7 +1055,7 @@ and Super Face reads that instead of the regex.
   (`turn.read`), so it can't see a line added during it, and it said so (S4). Read the notes again
   before reflecting.
 
-### 6. It doesn't know when to stop, or when to ask first (medium)
+#### 6. It doesn't know when to stop, or when to ask first (medium)
 
 S6: four messages to Peter, and a fifth on its way, for data the page didn't have (one-way fares, departure times), with "I'll
 try…" said between them, rather than telling the user what it had. `MAX_ROUNDS` is ten for one
@@ -871,7 +1068,7 @@ To close it: in the prompt, after two tries that don't get closer, tell the user
 what's left. Ask at the start when a word could mean two things that give different answers (a
 date, which store). Fewer rounds for one request, or a spoken line after three.
 
-### 7. The Run card may not show what will be done (medium; check)
+#### 7. The Run card may not show what will be done (medium; check)
 
 S5: a "Do steps in Chrome" (type a message to someone on WhatsApp) waits for Run on the Mac, as it
 should. But the reason the card shows is `sayWhy(client, said)`: the first line of what was said,
@@ -884,7 +1081,7 @@ that doesn't show the message reached her chat. A steps run could end with readi
 ("find "I'm running about 15 minutes late" on the page"), or the model could say "I typed it to
 Ngozi" rather than "it's sent".
 
-### 8. Smaller things
+#### 8. Smaller things
 
 - **Said twice** (S4): after a note-writing message came back "Added", the model told the user the
   answer again. The prompt could say: when Peter only confirms something done for you and the user
@@ -905,7 +1102,7 @@ Ngozi" rather than "it's sent".
   "…, one adult, and list the best options…"): the web search gets the extra words. Part of
   finding 1, and the cheapest to fix in the prompt: "fill a blank with only what goes there".
 
-### What to try next
+#### What to try next
 
 - Re-run the six with the prompt changes from findings 1 to 3 (the scenario sheets and the role
   briefs are in `scripts/simulate/`), and compare the count of compound messages and early claims.
