@@ -129,7 +129,11 @@ final class PeterTests: XCTestCase {
         _ = await say("greet Sam", replyTo: "http://127.0.0.1:8769/api/peter")
         let id = try XCTUnwrap(mac.requestIDs.first)
         mac.set(id, ["state": "denied", "ok": false])
-        try await Task.sleep(nanoseconds: 50_000_000)
+        // Once it's been turned away and is untold again (not while a try is still going).
+        await until {
+            guard self.inbox.refused > 0, let e = await self.peter.sayLog.entries("Tester").first(where: { $0.asks }) else { return false }
+            return e.state.key == "denied" && e.told != e.state.key
+        }
         model.plays(.says("Nothing is scheduled."))
         let next = await say("what's scheduled")
         XCTAssertTrue(next.hasPrefix("Meanwhile: The greet didn't run: it was turned down on the Mac.\n\nNothing is scheduled."), next)
