@@ -169,13 +169,16 @@ final class Inbox: @unchecked Sendable {
     private let lock = NSLock()
     private var _got: [[String: Any]] = []
     private var _refuse = false
+    private var _refused = 0
     var got: [[String: Any]] { lock.withLock { _got } }
     var refuse: Bool { get { lock.withLock { _refuse } } set { lock.withLock { _refuse = newValue } } }
+    /// How many times news was turned away.
+    var refused: Int { lock.withLock { _refused } }
 
     var deliver: @Sendable (Peter.SayNews) async -> Bool {
         { [self] news in
             lock.withLock {
-                if _refuse { return false }
+                if _refuse { _refused += 1; return false }
                 _got.append((try? JSONSerialization.jsonObject(with: news.body)) as? [String: Any] ?? [:])
                 return true
             }
